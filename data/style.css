@@ -1,0 +1,158 @@
+body {
+  background: #181c24;
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  color: white;
+}
+
+.container {
+  margin-top: 80px;
+  margin-bottom: 40px;
+  background: #23272f;
+  padding: 20px;
+  border-radius: 10px;
+  max-width: 700px;
+  width: 90%;
+  margin-left: auto;
+  margin-right: auto;
+  box-shadow: 0 0 10px rgba(0,0,0,0.5);
+}
+
+h1, h2 {
+  text-align: center;
+}
+
+input, button {
+  width: 100%;
+  padding: 12px;
+  margin-top: 10px;
+  border: none;
+  border-radius: 5px;
+  font-size: 16px;
+  box-sizing: border-box;
+}
+
+input {
+  background: #2c303a;
+  color: #ffffff;
+}
+
+button {
+  background: #4CAF50;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #45a049;
+}
+
+#fieldsContainer {
+  margin-top: 20px;
+}
+
+#fieldsContainer input {
+  margin-bottom: 8px;
+}
+
+#passwordList {
+  margin-top: 20px;
+  background: #2c303a;
+  padding: 10px;
+  border-radius: 5px;
+}
+
+.table-section {
+  margin-top: 30px;
+}
+
+.export-import-section {
+  margin-top: 20px;
+  text-align: center;
+}
+
+.top-menu {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  display: flex;
+  gap: 10px; /* расстояние между кнопками */
+}
+
+.top-button {
+  background: #4CAF50;
+  color: white;
+  padding: 8px 16px;
+  border-radius: 25px;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.3s;
+}
+
+.top-button:hover {
+  background: #45a049;
+  cursor: pointer;
+}
+
+.password-entry {
+  background: #2c303a;
+  padding: 10px;
+  margin-top: 10px;
+  border-radius: 5px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.actions button {
+  background: #4CAF50;
+  color: white;
+  border: none;
+  margin-left: 5px;
+  padding: 8px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.actions button:hover {
+  background: #45a049;
+}
+
+input[type="file"] {
+  background: none;
+  color: #ffffff;
+  border: none;
+  padding: 0;
+  margin-top: 10px;
+  font-size: 14px;
+  width: 100%;
+  box-sizing: border-box;
+}
+/* Таблица */
+#passwordTable        { width: 100%; border-collapse: collapse; table-layout: fixed; }
+#passwordTable th,
+#passwordTable td     { padding: 6px 10px; border: 1px solid #2b2f37; }
+
+/* Столбцы «утрамбовываем» */
+#passwordTable th:not(:last-child),
+#passwordTable td:not(:last-child) { max-width: 180px; }   /* можно подстроить */
+
+/* Обрезаем длинные строки */
+.truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Просто чтобы подсказка читалась */
+#passwordTable td:hover { background:#1e1e1e; }
+#passwordTable button { margin:2px 0; }   /* переносим правило к таблице */
+
+button       { margin:2px 0; }

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Настройки Wi-Fi</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <a href="/index.html" class="top-button">🏠 Home</a>
+  <a href='javascript:;' class="top-button" onclick='show_more_menu();'>🚪 Выйти</a>
+  <div class="container">
+    <h1>Wi-Fi Settings</h1>
+    <input type="text" id="ssid" placeholder="Wi-Fi SSID">
+    <input type="text" id="wifiPassword" placeholder="Wi-Fi Password">
+    <button onclick="saveWiFi()">Save Settings</button>
+	
+	<h2>Change Master Password</h2>
+	<form id="changePassForm">
+	  <input type="text" id="oldPass" placeholder="Old Password" required>
+	  <input type="text" id="newPass" placeholder="New Password" required>
+	  <input type="text" id="confirmPass" placeholder="Confirm New Password" required>
+	  <button type="submit">Change Password</button>
+	</form>
+	
+	<h2>Access Point Settings</h2>
+	<input type="text" id="apSsid" placeholder="AP SSID (default: Pocket-Password-Setup)">
+	<input type="text" id="apPassword" placeholder="AP Password (min 8 chars)">
+  </div>
+
+  <script src="/crypto-js.min.js"></script>
+  <script src="/script.js"></script>
+  <script>
+	document.getElementById('changePassForm').addEventListener('submit', async (e) => {
+	  e.preventDefault();
+
+	  const oldKey = document.getElementById('oldPass').value.trim();
+	  const newKey = document.getElementById('newPass').value.trim();
+	  const confirmPass = document.getElementById('confirmPass').value.trim();
+
+	  if (newKey !== confirmPass) {
+		alert("New passwords do not match!");
+		return;
+	  }
+
+	  const resp = await authorizedFetch('/changeMasterKey', {
+		method: "POST",
+		headers: {
+		  "Content-Type": "application/json"
+		},
+		body: JSON.stringify({
+		  old_key: oldKey,
+		  new_key: newKey
+		})
+	  });
+
+	  if (resp.ok) {
+		alert('✅ Password changed successfully! Please login again.');
+		sessionStorage.clear();
+		window.location.href = '/login.html';
+	  } else {
+		alert('❌ Failed to change password.');
+	  }
+	});
+	
+	window.addEventListener('load', loadCurrentSettings);
+  </script>
+</body>
+</html>
