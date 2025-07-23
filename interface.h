@@ -3,6 +3,7 @@
 #define INTERFACE_H
 
 #include <Arduino.h> // для String!
+#include <ArduinoJson.h> 
 #include <vector>    // для std::vector
 #include <utility>   // для std::pair
 
@@ -19,13 +20,18 @@ extern int passwordListIndex;
 extern int passwordDetailIndex;
 extern bool showPassword;
 extern int passwordScreenState;
+extern String apRandomPassword;
 
 void setupInterface();
 void handleInterface();
 String getApPassword();
+String generateRandomSSID();
+String generateRandomPassword();
 
 // новые экраны
 bool loadPasswordsFromFile();
+bool loadJsonFromFile(const char* path, DynamicJsonDocument& doc);
+bool saveJsonToFile(const char* path, const DynamicJsonDocument& doc);
 void showPasswordsScreen();
 void showConnectionScreen();
 void showAboutScreen();
