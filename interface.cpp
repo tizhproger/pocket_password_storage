@@ -10,6 +10,7 @@
 #include <Arduino.h> // уже есть через interface.h, но пусть будет
 #include <vector>
 #include <utility>
+#include <FS.h>
 
 // пины джойстика и дисплея (закоментированные для CORE-ESP32 + Air101-LCD)
 #define UP_PIN       2 //8
@@ -79,6 +80,31 @@ int passwordScreenState = 0;
 
 // вспомогалки для перерисовки
 static bool redraw = true;
+
+bool loadJsonFromFile(const char* path, DynamicJsonDocument& doc) {
+  File file = SPIFFS.open(path, "r");
+  if (!file) return false;
+  DeserializationError error = deserializeJson(doc, file);
+  file.close();
+  return !error;
+}
+
+bool saveJsonToFile(const char* path, const DynamicJsonDocument& doc) {
+  File file = SPIFFS.open(path, "w");
+  if (!file) return false;
+  serializeJson(doc, file);
+  file.close();
+  return true;
+}
+
+String getApPassword() {
+  DynamicJsonDocument doc(512);
+  if (!loadJsonFromFile("/settings.json", doc)) return "-";
+  if (!doc.containsKey("ap_password")) return "-";
+  String pw = doc["ap_password"].as<String>();
+  if (pw.length() < 8) return "-";  // безопасная проверка
+  return pw;
+}
 
 void setupInterface() {
   EEPROM.begin(64);
@@ -493,6 +519,28 @@ void showSleepModeScreen() {
 }
 
 void showPasswordsScreen(){
+  if (passwordEntries.size() == 0) {
+    static bool noPasswordsDrawn = false;
+
+    if (!noPasswordsDrawn) {
+      tft.fillScreen(ST77XX_BLACK);
+      tft.setTextColor(ST77XX_RED);
+      tft.setTextSize(1);
+      tft.setCursor(20, 30);
+      tft.print("No saved passwords");
+      noPasswordsDrawn = true;
+    }
+
+    // вернуться в меню по кнопке LEFT
+    if (digitalRead(LEFT_PIN) == LOW) {
+      state = ST_MENU;
+      noPasswordsDrawn = false;
+      delay(200);
+    }
+
+    return;
+  }
+
   if (state == ST_PASSWORDS && passwordScreenState == 0) {
       if (redraw) {
         tft.fillScreen(ST77XX_BLACK);
@@ -620,7 +668,7 @@ void showConnectionScreen() {
       // AP режим
       mode = "AP";
       ssid = WiFi.softAPSSID();
-      pass = WiFi.softAPSSID() == "Pocket-Password-Setup" ? "123456789" : getApPassword();
+      pass = getApPassword() != "-" ? getApPassword() : apRandomPassword;
       ip = WiFi.softAPIP().toString();
     } else if (WiFi.status() == WL_CONNECTED) {
       // STA режим
