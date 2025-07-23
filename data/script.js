@@ -233,47 +233,38 @@ async function addPassword() {
 }
 
 async function saveWiFi() {
-	  const ssid = document.getElementById('ssid').value.trim();
-	  const password = document.getElementById('wifiPassword').value.trim();
-	  const apSsid = document.getElementById('apSsid').value.trim();
-	  const apPassword = document.getElementById('apPassword').value.trim();
+  const ssid = document.getElementById('ssid').value;
+  const password = document.getElementById('wifiPassword').value;
 
-	  if (!ssid) {
-		alert('Введите SSID Wi-Fi');
-		return;
-	  }
+  const res = await fetch('/save_wifi', {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ssid, password })
+  });
 
-	  const passwordStorage = sessionStorage.getItem('pps_password');
-	  if (!passwordStorage) {
-		alert('Нет сохранённого пароля. Войдите снова.');
-		window.location.href = '/login.html';
-		return;
-	  }
+  if (res.ok) {
+    alert("✅ WiFi settings saved.");
+  } else {
+    alert("❌ Failed to save WiFi settings.");
+  }
+};
 
-	  const saltResponse = await authorizedFetch('/getSalt');
-	  const saltData = await saltResponse.json();
-	  const salt = saltData.salt;
+async function saveAP() {
+  const ssid = document.getElementById('apSsid').value;
+  const password = document.getElementById('apPassword').value;
 
-	  const resp = await authorizedFetch('/saveSettings', {
-		  method: 'POST',
-		  headers: {
-			'Content-Type': 'application/json'
-		  },
-		  body: JSON.stringify({
-			ssid,
-			password,
-			ap_ssid: apSsid,
-			ap_password: apPassword
-		  })
-		});
+  const res = await fetch('/save_ap', {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ssid, password })
+  });
 
-	  if (resp.ok) {
-		alert('✅ Настройки Wi-Fi успешно сохранены! Устройство перезагрузится.');
-		setTimeout(() => window.location.href = '/login.html', 3000);
-	  } else {
-		alert('❌ Ошибка сохранения настроек');
-	  }
-	};
+  if (res.ok) {
+    alert("✅ AP settings saved.");
+  } else {
+    alert("❌ Failed to save AP settings.");
+  }
+};
 	
 async function loadCurrentSettings() {
   try {
