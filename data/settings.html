@@ -7,13 +7,16 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <a href="/index.html" class="top-button">🏠 Home</a>
-  <a href='javascript:;' class="top-button" onclick='show_more_menu();'>🚪 Выйти</a>
+  <div class="top-menu">
+      <a href="/index.html" class="top-button">🏠 Домой</a>
+      <a href="javascript:;" class="top-button" onclick="show_more_menu();">🚪 Выйти</a>
+  </div>
+  
   <div class="container">
     <h1>Wi-Fi Settings</h1>
     <input type="text" id="ssid" placeholder="Wi-Fi SSID">
     <input type="text" id="wifiPassword" placeholder="Wi-Fi Password">
-    <button onclick="saveWiFi()">Save Settings</button>
+    <button onclick="saveWiFi()">Save WiFi Settings</button>
 	
 	<h2>Change Master Password</h2>
 	<form id="changePassForm">
@@ -24,8 +27,9 @@
 	</form>
 	
 	<h2>Access Point Settings</h2>
-	<input type="text" id="apSsid" placeholder="AP SSID (default: Pocket-Password-Setup)">
+	<input type="text" id="apSsid" placeholder="AP SSID (default: Random)">
 	<input type="text" id="apPassword" placeholder="AP Password (min 8 chars)">
+	<button onclick="saveAP()">Save AP Settings</button>
   </div>
 
   <script src="/crypto-js.min.js"></script>
