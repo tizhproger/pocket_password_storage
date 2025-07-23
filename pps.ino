@@ -2,7 +2,7 @@
 // core: Wi-Fi fallback, web server, AES encryption, password storage, UI interaction + auth
 
 #include <Arduino.h>
-#include <SPIFFS.h>    // вместо <LittleFS.h>
+#include <SPIFFS.h>
 #include <FS.h>
 #include <EEPROM.h>
 #include <WiFi.h>
@@ -10,12 +10,14 @@
 #include <ArduinoJson.h>
 #include <mbedtls/aes.h>
 #include "interface.h"
-#include <esp_partition.h>  // для esp_partition_find_first
+#include <esp_partition.h>
 #include "mbedtls/md.h"
 #include "mbedtls/pkcs5.h"
 #include <mbedtls/gcm.h>
 #include <vector>
+#include <utility>
 #include <DNSServer.h>
+#include <ESPmDNS.h>
 
 #define AES_KEY_SIZE 16
 #define FILE_NAME "/passwords.enc"
@@ -23,10 +25,13 @@
 
 // Состояние Wi-Fi
 enum WiFiState { WIFI_INIT, WIFI_CONNECTING, WIFI_CONNECTED, AP_MODE };
+
 static WiFiState wifiState = WIFI_INIT;
 static unsigned long wifiStartMillis = 0;
 static const unsigned long WIFI_TIMEOUT_MS = 10000; // 10 секунд
+
 volatile bool rebootPending = false;
+
 String deviceSalt = "";
 
 // Хранение конфигурации
@@ -35,6 +40,7 @@ struct WiFiConfig {
   String password;
   String ap_ssid;
   String ap_password;
+  String wifi_mode;
 };
 WiFiConfig wifiCfg;
 
@@ -69,6 +75,16 @@ String newToken() {
   for (int i=0;i<32;i++) buf[i]= "0123456789abcdef"[esp_random() % 16];
   buf[32]='\0';
   return String(buf);
+}
+
+String getApPassword() {
+  File f = SPIFFS.open("/settings.json", "r");
+  if (!f) return "-";
+  StaticJsonDocument<512> doc;
+  DeserializationError err = deserializeJson(doc, f);
+  f.close();
+  if (err) return "-";
+  return doc["ap_password"] | "-";
 }
 
 bool getPasswordsDoc(DynamicJsonDocument &doc) {
@@ -137,6 +153,65 @@ bool gcmDecrypt(const uint8_t *cipher, size_t len, const uint8_t iv[12], const u
               tag, 16, cipher, plain.data());
     mbedtls_gcm_free(&ctx);
     return ret==0;
+}
+
+void saveWiFiModeToSettings(const String& mode) {
+  StaticJsonDocument<256> doc;
+  File f;
+  if (SPIFFS.exists("/settings.json")) {
+    f = SPIFFS.open("/settings.json", "r");
+    deserializeJson(doc, f);
+    f.close();
+  }
+  doc["wifi_mode"] = mode;
+  f = SPIFFS.open("/settings.json", "w");
+  serializeJson(doc, f);
+  f.close();
+}
+
+bool loadPasswordsFromFile() {
+  passwordEntries.clear();
+
+  if (!SPIFFS.exists("/passwords.enc")) return true;
+
+  File f = SPIFFS.open("/passwords.enc", "r");
+  size_t sz = f.size();
+  if (sz <= 28) { f.close(); return true; } // 12 iv + 16 tag
+
+  uint8_t iv[12], tag[16];
+  f.read(iv,12); f.read(tag,16);
+  sz -= 28;
+  std::vector<uint8_t> cipher(sz);
+  f.read(cipher.data(), sz);
+  f.close();
+
+  std::vector<uint8_t> plain(sz);
+  mbedtls_gcm_context ctx; mbedtls_gcm_init(&ctx);
+  bool ok = mbedtls_gcm_setkey(&ctx, MBEDTLS_CIPHER_ID_AES, master_key, 128) == 0 &&
+    mbedtls_gcm_auth_decrypt(&ctx, sz, iv, 12, nullptr, 0, tag, 16, cipher.data(), plain.data()) == 0;
+  mbedtls_gcm_free(&ctx);
+
+  if (!ok) return false;
+
+  DynamicJsonDocument doc(4096);
+  if (deserializeJson(doc, (const char*)plain.data(), sz) != DeserializationError::Ok) return false;
+  if (!doc.is<JsonArray>()) return true;
+
+  for (JsonObject obj : doc.as<JsonArray>()) {
+    PasswordEntry e;
+    e.site = obj["site"] | "";
+    e.login = obj["login"] | "";
+    e.password = obj["password"] | "";
+
+    for (JsonPair kv : obj) {
+      String k = kv.key().c_str();
+      if (k != "site" && k != "login" && k != "password") {
+        e.extras.push_back({k, kv.value().as<String>()});
+      }
+    }
+    passwordEntries.push_back(e);
+  }
+  return true;
 }
 
 /* ---------- общая подпрограмма: грузим массив паролей ---------- */
@@ -256,6 +331,7 @@ void loadWiFiConfig() {
       wifiCfg.ssid     = doc["ssid"].as<String>();
       wifiCfg.password = doc["password"].as<String>();
       wifiCfg.ap_password = doc["ap_password"] | ""; // по умолчанию пусто
+      wifiCfg.wifi_mode = doc["wifi_mode"] | "";
     } else {
       wifiCfg = { "", "" }; // 👈 если нет Wi-Fi настроек, сбрасываем
     }
@@ -269,21 +345,22 @@ void loadWiFiConfig() {
 void initWiFi() {
   loadWiFiConfig();
 
-  WiFi.mode(WIFI_STA);
-  if (wifiCfg.ssid.length()) {
+  if (wifiCfg.ssid.length() && wifiCfg.wifi_mode == "wifi") {
+    WiFi.mode(WIFI_STA);
     Serial.printf("📡 Trying to connect to '%s'\n", wifiCfg.ssid.c_str());
     WiFi.begin(wifiCfg.ssid.c_str(), wifiCfg.password.c_str());
     wifiState = WIFI_CONNECTING;
     wifiStartMillis = millis();
   } else {
     // нет сохранённых данных — сразу в AP
-    Serial.println("❌ No SSID saved, starting AP");
+    WiFi.mode(WIFI_AP);
+    delay(100); 
+    Serial.println("📡 Starting AP");
     String apName = wifiCfg.ap_ssid.length() > 0 ? wifiCfg.ap_ssid : "Pocket-Password-Setup";
-    if (wifiCfg.ap_password.length() >= 8) {
-      WiFi.softAP(apName.c_str(), wifiCfg.ap_password.c_str());
-    } else {
-      WiFi.softAP(apName.c_str()); // без пароля
-    }
+    String apPass = wifiCfg.ap_password.length() > 0 ? wifiCfg.ap_password : "123456789";
+
+    WiFi.softAP(apName.c_str(), apPass.c_str());
+    Serial.println("📡 AP with password started...");
     Serial.print("📶 AP IP: "); Serial.println(WiFi.softAPIP());
     wifiState = AP_MODE;
   }
@@ -352,6 +429,7 @@ void handleWiFi() {
         WiFi.softAP("PPS-Setup");
         Serial.print("📶 AP IP: "); Serial.println(WiFi.softAPIP());
         wifiState = AP_MODE;
+      } else {
       }
       break;
 
