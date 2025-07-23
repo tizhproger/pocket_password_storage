@@ -33,6 +33,7 @@ static const unsigned long WIFI_TIMEOUT_MS = 10000; // 10 секунд
 volatile bool rebootPending = false;
 
 String deviceSalt = "";
+String apRandomPassword = "";
 
 // Хранение конфигурации
 struct WiFiConfig {
@@ -77,14 +78,22 @@ String newToken() {
   return String(buf);
 }
 
-String getApPassword() {
-  File f = SPIFFS.open("/settings.json", "r");
-  if (!f) return "-";
-  StaticJsonDocument<512> doc;
-  DeserializationError err = deserializeJson(doc, f);
-  f.close();
-  if (err) return "-";
-  return doc["ap_password"] | "-";
+String generateRandomSSID() {
+  String ssid = "PPS-";
+  const char charset[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  for (int i = 0; i < 4; ++i) {
+    ssid += charset[random(0, sizeof(charset) - 1)];
+  }
+  return ssid;
+}
+
+String generateRandomPassword(int length = 10) {
+  String password = "";
+  const char charset[] = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#$";
+  for (int i = 0; i < length; ++i) {
+    password += charset[random(0, sizeof(charset) - 1)];
+  }
+  return password;
 }
 
 bool getPasswordsDoc(DynamicJsonDocument &doc) {
@@ -330,6 +339,7 @@ void loadWiFiConfig() {
     if (doc.containsKey("ssid") && doc.containsKey("password")) {
       wifiCfg.ssid     = doc["ssid"].as<String>();
       wifiCfg.password = doc["password"].as<String>();
+      wifiCfg.ap_ssid = doc["ap_ssid"] | "";
       wifiCfg.ap_password = doc["ap_password"] | ""; // по умолчанию пусто
       wifiCfg.wifi_mode = doc["wifi_mode"] | "";
     } else {
@@ -356,12 +366,14 @@ void initWiFi() {
     WiFi.mode(WIFI_AP);
     delay(100); 
     Serial.println("📡 Starting AP");
-    String apName = wifiCfg.ap_ssid.length() > 0 ? wifiCfg.ap_ssid : "Pocket-Password-Setup";
-    String apPass = wifiCfg.ap_password.length() > 0 ? wifiCfg.ap_password : "123456789";
+    String apRandomSSID = wifiCfg.ap_ssid.length() > 0 ? wifiCfg.ap_ssid : generateRandomSSID();
+    apRandomPassword = wifiCfg.ap_password.length() > 0 && wifiCfg.ap_password.length() == 8 ? wifiCfg.ap_password : generateRandomPassword(8);
 
-    WiFi.softAP(apName.c_str(), apPass.c_str());
-    Serial.println("📡 AP with password started...");
+    WiFi.softAP(apRandomSSID.c_str(), apRandomPassword.c_str());
+    Serial.println("📡 AP started...");
     Serial.print("📶 AP IP: "); Serial.println(WiFi.softAPIP());
+    Serial.print("📶 AP SSID: "); Serial.println(apRandomSSID);
+    Serial.print("📶 AP Password: "); Serial.println(apRandomPassword);
     wifiState = AP_MODE;
   }
 }
@@ -507,8 +519,11 @@ void handleGetSettings() {
   }
   // формируем ответ
   StaticJsonDocument<256> out;
-  out["ssid"]     = doc["ssid"]     | "";
-  out["password"] = doc["password"] | "";
+  out["ssid"]        = doc["ssid"]        | "";
+  out["password"]    = doc["password"]    | "";
+  out["ap_ssid"]     = doc["ap_ssid"]     | "";
+  out["ap_password"] = doc["ap_password"] | "";
+
   String s; serializeJson(out, s);
   server.send(200, "application/json", s);
 }
@@ -962,6 +977,41 @@ void setupWebServer() {
     server.streamFile(f, "text/html");
     f.close();
   });
+
+  server.on("/save_wifi", HTTP_POST, []() {
+    DynamicJsonDocument doc(256);
+    if (deserializeJson(doc, server.arg("plain"))) {
+      server.send(400, "text/plain", "Invalid JSON");
+      return;
+    }
+
+    DynamicJsonDocument settings(512);
+    loadJsonFromFile("/settings.json", settings);
+
+    if (doc.containsKey("ssid")) settings["ssid"] = doc["ssid"];
+    if (doc.containsKey("password")) settings["password"] = doc["password"];
+
+    saveJsonToFile("/settings.json", settings);
+    server.send(200, "text/plain", "WiFi settings saved");
+  });
+
+  server.on("/save_ap", HTTP_POST, []() {
+    DynamicJsonDocument doc(256);
+    if (deserializeJson(doc, server.arg("plain"))) {
+      server.send(400, "text/plain", "Invalid JSON");
+      return;
+    }
+
+    DynamicJsonDocument settings(512);
+    loadJsonFromFile("/settings.json", settings);
+
+    if (doc.containsKey("ssid")) settings["ap_ssid"] = doc["ssid"];
+    if (doc.containsKey("password")) settings["ap_password"] = doc["password"];
+
+    saveJsonToFile("/settings.json", settings);
+    server.send(200, "text/plain", "AP settings saved");
+  });
+
   server.on("/initKey", HTTP_POST, handleInitKey);
   server.on("/changeMasterKey", HTTP_POST, handleChangeMasterKey);
   server.on("/login", HTTP_POST, handleLogin);
