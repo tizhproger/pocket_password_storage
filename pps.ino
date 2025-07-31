@@ -21,7 +21,6 @@
 
 #define AES_KEY_SIZE 16
 #define FILE_NAME "/passwords.enc"
-#define EEPROM_ADDR 0
 
 // Состояние Wi-Fi
 enum WiFiState { WIFI_INIT, WIFI_CONNECTING, WIFI_CONNECTED, AP_MODE };
@@ -57,6 +56,9 @@ std::vector<Session> sessions;
 
 static uint8_t failCount = 0;
 static unsigned long blockUntil = 0;
+
+const int MK_EE_ADDR = 0;
+const int PIN_EE_ADDR = 32;
 
 bool loadPasswordsArray(DynamicJsonDocument&);
 
@@ -94,6 +96,33 @@ String generateRandomPassword(int length = 10) {
     password += charset[random(0, sizeof(charset) - 1)];
   }
   return password;
+}
+
+bool ct_memcmp(const uint8_t *a, const uint8_t *b, size_t len) {
+  uint8_t diff = 0;
+  for (size_t i = 0; i < len; i++)
+    diff |= a[i] ^ b[i];
+  return diff == 0;
+}
+
+bool savePinToEEPROM(const String &pin) {
+  uint8_t dk[16];
+  if (!deriveKeyFromPassword(pin, deviceSalt, dk, 16)) return false;
+  for (int i = 0; i < 16; i++) EEPROM.write(PIN_EE_ADDR + i, dk[i]);
+  EEPROM.commit();
+  explicit_bzero(dk,16);
+  return true;
+}
+
+bool verifyPin(const String &pin) {
+  uint8_t dk[16];
+  if (!deriveKeyFromPassword(pin, deviceSalt, dk, 16)) return false;
+  uint8_t eepromBuf[16];
+  for (int i = 0; i < 16; i++) eepromBuf[i] = EEPROM.read(PIN_EE_ADDR + i);
+  bool ok = ct_memcmp(eepromBuf, dk, 16);
+  explicit_bzero(eepromBuf, 16);
+  explicit_bzero(dk, sizeof dk);
+  return ok;
 }
 
 bool getPasswordsDoc(DynamicJsonDocument &doc) {
@@ -318,7 +347,7 @@ bool deriveKeyFromPassword(const String& password, const String& saltHex, uint8_
     MBEDTLS_MD_SHA256,                             // тип хеша
     (const unsigned char*)password.c_str(), password.length(), // пароль
     saltBytes, sizeof(saltBytes),                  // соль
-    10000,                                          // итерации
+    50000,                                          // итерации
     outLen,                                         // длина выходного ключа
     output                                          // буфер для результата
   );
@@ -459,7 +488,7 @@ void loadMasterKey() {
 
   bool empty = true;
   for(int i=0; i<AES_KEY_SIZE; i++){
-    master_key[i] = EEPROM.read(EEPROM_ADDR + i);
+    master_key[i] = EEPROM.read(MK_EE_ADDR + i);
     if (master_key[i] != 0xFF) empty = false;
   }
 
@@ -493,7 +522,7 @@ void handleSetMasterKey() {
   for (int i = 0; i < 16; i++) {
     char byteStr[3] = { newKeyHex[i * 2], newKeyHex[i * 2 + 1], 0 };
     master_key[i] = strtoul(byteStr, nullptr, 16);
-    EEPROM.write(EEPROM_ADDR + i, master_key[i]);
+    EEPROM.write(MK_EE_ADDR + i, master_key[i]);
   }
   EEPROM.commit();
   server.send(200, "text/plain", "Master key updated");
@@ -888,7 +917,7 @@ void handleInitKey() {
 
   // Сохраняем Derived Key в EEPROM
   for (int i = 0; i < 16; i++) {
-    EEPROM.write(i, derivedKey[i]);
+    EEPROM.write(MK_EE_ADDR + i, derivedKey[i]);
   }
   EEPROM.commit();
 
@@ -946,7 +975,7 @@ void handleChangeMasterKey() {
   for (int i = 0; i < 16; i++) {
     char byteStr[3] = { (char)tolower(newKey[i * 2]), (char)tolower(newKey[i * 2 + 1]), 0 };
     master_key[i] = strtoul(byteStr, nullptr, 16);
-    EEPROM.write(EEPROM_ADDR + i, master_key[i]);
+    EEPROM.write(MK_EE_ADDR + i, master_key[i]);
   }
   EEPROM.commit();
 
@@ -1027,7 +1056,7 @@ void setup() {
   Serial.begin(115200);
   delay(100);
 
-  EEPROM.begin(64);
+  EEPROM.begin(128);
 
   while(!Serial);  // дождаться монитора
 
