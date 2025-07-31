@@ -11,6 +11,7 @@
 #include <vector>
 #include <utility>
 #include <FS.h>
+#include <mbedtls/platform_util.h>
 
 // пины джойстика и дисплея (закоментированные для CORE-ESP32 + Air101-LCD)
 #define UP_PIN       2 //8
@@ -35,16 +36,17 @@
 Adafruit_ST7789 tft(TFT_CS, TFT_DC, TFT_RST);
 
 // пункты главного меню
-const char* menuItems[] = {"Passwords", "Connection", "Battery", "Sleep mode", "About", "Mode", "Factory reset"};
+const char* menuItems[] = {"Passwords", "Connection", "Battery", "Sleep mode", "About", "Mode", "Factory reset", "Change PIN"};
 const int menuSize = sizeof(menuItems)/sizeof(menuItems[0]);
 
 static bool batteryDrawn = false;
 static unsigned long lastUpdate = 0;
 
-// текущие переменные
 enum AppState {
   ST_LOCKED,
   ST_UNLOCK_PROMPT,
+  ST_SET_PIN,
+  ST_CONFIRM_PIN,
   ST_MENU,
   ST_PASSWORDS,
   ST_PASSWORD_DETAILS,
@@ -64,22 +66,21 @@ static int pageOffset = 0;
 static AppState state = ST_LOCKED;
 static int menuIndex = 0;
 static int sequenceIndex = 0;
-static const int correctSeq[] = {UP_PIN, UP_PIN, DOWN_PIN, RIGHT_PIN};
-static const int seqLen = sizeof(correctSeq)/sizeof(correctSeq[0]);
-static int userSeq[seqLen];
 static int failedAttempts = 0;
 static unsigned long lockUntil = 0;
+static String pinBuffer = "";
+static String confirmBuffer = "";
+static const int MAX_PIN_LEN = 8;
+static int pinPos = 0;
 
-// Глобальные переменные (теперь только здесь!)
-// (убери их из других файлов, если есть дублирование)
 std::vector<PasswordEntry> passwordEntries;
 int passwordListIndex = 0;
 int passwordDetailIndex = 0;
 bool showPassword = false;
 int passwordScreenState = 0;
 
-// вспомогалки для перерисовки
 static bool redraw = true;
+static char current = '0';
 
 bool loadJsonFromFile(const char* path, DynamicJsonDocument& doc) {
   File file = SPIFFS.open(path, "r");
@@ -107,7 +108,7 @@ String getApPassword() {
 }
 
 void setupInterface() {
-  EEPROM.begin(64);
+  EEPROM.begin(128);
 
   // инициализируем дисплей
   SPI.begin(TFT_SCLK, TFT_MISO, TFT_MOSI);
@@ -137,63 +138,70 @@ void setupInterface() {
   delay(2000);
   // — конец стартового экрана —
 
-  // стартовый экран
-  state = ST_UNLOCK_PROMPT;
+  bool pinSet = false;
+  for (int i = 0; i < 16; i++) if (EEPROM.read(PIN_EE_ADDR + i) != 0xFF) pinSet = true;
+
+  if (!pinSet) {
+    state = ST_SET_PIN;
+  } else {
+    state = ST_UNLOCK_PROMPT;
+  }
   redraw = true;
 }
 
 void handleInterface() {
   // общая разблокировка
-  if (state==ST_UNLOCK_PROMPT) {
+  if (state == ST_UNLOCK_PROMPT) {
     if (redraw) {
       tft.fillScreen(ST77XX_BLACK);
       tft.setTextSize(2);
       tft.setTextColor(ST77XX_WHITE);
-      tft.setCursor(10,20);
-      tft.print("Enter Code:");
-      sequenceIndex = 0;
+      tft.setCursor(10, 20);
+      tft.print("Enter PIN:");
+      pinBuffer = "";
+      pinPos = 0;
       redraw = false;
+      current = '0';
     }
-    int in = -1;
-    if (digitalRead(UP_PIN)==LOW)    in=UP_PIN;
-    if (digitalRead(DOWN_PIN)==LOW)  in=DOWN_PIN;
-    if (digitalRead(LEFT_PIN)==LOW)  in=LEFT_PIN;
-    if (digitalRead(RIGHT_PIN)==LOW) in=RIGHT_PIN;
-    if (in!=-1 && sequenceIndex<seqLen) {
-      userSeq[sequenceIndex++] = in;
-      tft.setCursor(10 + sequenceIndex*20, 50);
+    // Навигация цифрами 0-9 (UP/DOWN смена символа)
+    if (digitalRead(UP_PIN) == LOW)  { current = (current == '9') ? '0' : current + 1; delay(200); }
+    if (digitalRead(DOWN_PIN) == LOW){ current = (current == '0') ? '9' : current - 1; delay(200); }
+    if (digitalRead(RIGHT_PIN) == LOW && pinPos < MAX_PIN_LEN) {
+      pinBuffer += current; pinPos++;
+      tft.setCursor(10 + pinPos*15, 50);
       tft.setTextColor(ST77XX_YELLOW);
-      tft.print("*");
+      tft.print('*');
       delay(200);
     }
-    if (sequenceIndex>=seqLen) {
-      bool ok=true;
-      for(int i=0;i<seqLen;i++) if(userSeq[i]!=correctSeq[i]) { ok=false; break; }
-      if (ok) {
+    if (digitalRead(LEFT_PIN) == LOW && pinPos > 0) {
+      pinPos--; pinBuffer.remove(pinPos);
+      tft.fillRect(10 + (pinPos+1)*15, 50, 15, 20, ST77XX_BLACK);
+      delay(200);
+    }
+    if (digitalRead(SELECT_PIN) == LOW) {
+      if (verifyPin(pinBuffer)) {
         state = ST_MENU;
-        redraw = true;
-        failedAttempts=0;
+        explicit_bzero(&pinBuffer[0], pinBuffer.length());
+        pinBuffer.clear();
+        failedAttempts = 0;
       } else {
         failedAttempts++;
         tft.fillScreen(ST77XX_RED);
-        tft.setCursor(10,30);
-        tft.setTextColor(ST77XX_WHITE);
-        tft.print("Wrong Code!");
+        tft.setCursor(10, 30);
+        tft.print("Wrong PIN!");
         delay(1000);
-        if (failedAttempts>=3) {
-          lockUntil = millis()+30000;
+        if (failedAttempts >= 3) {
+          lockUntil = millis() + (1UL << failedAttempts) * 1000UL;
           state = ST_LOCKED;
-        } else {
-          state = ST_UNLOCK_PROMPT;
         }
-        redraw = true;
       }
+      redraw = true;
     }
     return;
   }
 
   // экран блокировки
-  if (state==ST_LOCKED) {
+  if (state == ST_LOCKED) {
     if (redraw) {
       tft.fillScreen(ST77XX_RED);
       tft.setTextSize(2);
@@ -202,9 +210,10 @@ void handleInterface() {
       tft.print("LOCKED!");
       redraw=false;
     }
-    if (millis()>lockUntil) {
-      state=ST_UNLOCK_PROMPT;
-      redraw=true;
+    if (millis() > lockUntil) {
+      state = ST_UNLOCK_PROMPT;
+      redraw = true;
+      failedAttempts = 0;
     }
     return;
   }
@@ -220,6 +229,8 @@ void handleInterface() {
       tft.setTextColor(ST77XX_WHITE);
       tft.setCursor(10, 20);
       tft.print("Clear all data?");
+      tft.setCursor(10, 30);
+      tft.print("PIN/Keys will be erased");
       tft.setTextSize(1);
       tft.setTextColor(ST77XX_WHITE);
       tft.setCursor(10, 50);
@@ -250,8 +261,7 @@ void handleInterface() {
         delay(300);
         confirmStage = true;
       } else {
-        EEPROM.begin(64);
-        for (int i = 0; i < 64; i++) EEPROM.write(i, 0xFF);   // Стереть все 64 байта (весь диапазон)
+        for (int i = 0; i < 128; i++) EEPROM.write(i, 0xFF);   // Стереть все 64 байта (весь диапазон)
           EEPROM.commit();
           SPIFFS.format();
           ESP.restart();
@@ -338,8 +348,68 @@ void handleInterface() {
         case 4: state = ST_ABOUT;          break;
         case 5: state = ST_WIFI_MODE; redraw = true; break;
         case 6: state = ST_ERASE;  break;
+        case 7: state = ST_SET_PIN; redraw = true; break;
       }
       delay(200);
+      redraw = true;
+    }
+    return;
+  }
+
+  if (state == ST_SET_PIN || state == ST_CONFIRM_PIN) {
+    if (redraw) {
+      tft.fillScreen(ST77XX_BLACK);
+      tft.setTextSize(2);
+      tft.setTextColor(ST77XX_WHITE);
+      tft.setCursor(10, 20);
+      tft.print(state == ST_SET_PIN ? "Set PIN:" : "Confirm PIN:");
+      pinBuffer = "";
+      pinPos = 0;
+      redraw = false;
+      current = '0';
+    }
+    // Навигация цифрами 0-9 (UP/DOWN смена символа)
+    if (digitalRead(UP_PIN) == LOW)  { current = (current == '9') ? '0' : current + 1; delay(200); }
+    if (digitalRead(DOWN_PIN) == LOW){ current = (current == '0') ? '9' : current - 1; delay(200); }
+    if (digitalRead(RIGHT_PIN) == LOW && pinPos < MAX_PIN_LEN) {
+      pinBuffer += current; pinPos++;
+      tft.setCursor(10 + pinPos*15, 50);
+      tft.setTextColor(ST77XX_YELLOW);
+      tft.print('*');
+      delay(200);
+    }
+    if (digitalRead(LEFT_PIN) == LOW && pinPos > 0) {
+      pinPos--; pinBuffer.remove(pinPos);
+      tft.fillRect(10 + (pinPos+1)*15, 50, 15, 20, ST77XX_BLACK);
+      delay(200);
+    }
+    if (digitalRead(SELECT_PIN) == LOW) {
+      if (pinBuffer.length() < 4) {
+          tft.fillScreen(ST77XX_RED);
+          tft.setCursor(10, 30);
+          tft.print("Min 4 digits");
+          delay(1000);
+          redraw = true;
+          return;
+        }
+      if (state == ST_SET_PIN) {
+        confirmBuffer = pinBuffer;
+        state = ST_CONFIRM_PIN;
+      } else {
+        if (pinBuffer == confirmBuffer) {
+          savePinToEEPROM(pinBuffer);
+          explicit_bzero(&pinBuffer[0], pinBuffer.length());
+          pinBuffer.clear();
+          confirmBuffer.clear();
+          state = ST_MENU;
+        } else {
+          tft.fillScreen(ST77XX_RED);
+          tft.setCursor(10, 30);
+          tft.print("Mismatch!");
+          delay(1000);
+          state = ST_SET_PIN;
+        }
+      }
       redraw = true;
     }
     return;
