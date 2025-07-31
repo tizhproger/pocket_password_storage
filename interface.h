@@ -20,6 +20,8 @@ extern int passwordListIndex;
 extern int passwordDetailIndex;
 extern bool showPassword;
 extern int passwordScreenState;
+extern const int MK_EE_ADDR;
+extern const int PIN_EE_ADDR;
 extern String apRandomPassword;
 
 void setupInterface();
@@ -32,6 +34,8 @@ String generateRandomPassword();
 bool loadPasswordsFromFile();
 bool loadJsonFromFile(const char* path, DynamicJsonDocument& doc);
 bool saveJsonToFile(const char* path, const DynamicJsonDocument& doc);
+bool verifyPin(const String &pin);
+bool savePinToEEPROM(const String &pin);
 void showPasswordsScreen();
 void showConnectionScreen();
 void showAboutScreen();
