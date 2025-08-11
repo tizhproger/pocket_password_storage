@@ -58,7 +58,6 @@ static uint8_t failCount = 0;
 static unsigned long blockUntil = 0;
 
 const int MK_EE_ADDR = 0;
-const int PIN_EE_ADDR = 32;
 
 bool loadPasswordsArray(DynamicJsonDocument&);
 
@@ -106,23 +105,40 @@ bool ct_memcmp(const uint8_t *a, const uint8_t *b, size_t len) {
 }
 
 bool savePinToEEPROM(const String &pin) {
-  uint8_t dk[16];
-  if (!deriveKeyFromPassword(pin, deviceSalt, dk, 16)) return false;
-  for (int i = 0; i < 16; i++) EEPROM.write(PIN_EE_ADDR + i, dk[i]);
+  const int n = pin.length();
+  if (n < 4 || n > PIN_EE_MAX - 1) return false;
+
+  for (int i = 0; i < n; i++) EEPROM.write(PIN_EE_ADDR + i, (uint8_t)pin[i]);
+  EEPROM.write(PIN_EE_ADDR + n, 0x00);
+  for (int i = n + 1; i < PIN_EE_MAX; i++) EEPROM.write(PIN_EE_ADDR + i, 0xFF);
+
   EEPROM.commit();
-  explicit_bzero(dk,16);
   return true;
 }
 
-bool verifyPin(const String &pin) {
-  uint8_t dk[16];
-  if (!deriveKeyFromPassword(pin, deviceSalt, dk, 16)) return false;
-  uint8_t eepromBuf[16];
-  for (int i = 0; i < 16; i++) eepromBuf[i] = EEPROM.read(PIN_EE_ADDR + i);
-  bool ok = ct_memcmp(eepromBuf, dk, 16);
-  explicit_bzero(eepromBuf, 16);
-  explicit_bzero(dk, sizeof dk);
-  return ok;
+static String readPinFromEEPROM() {
+  char buf[PIN_EE_MAX + 1];
+  int i = 0;
+  for (; i < PIN_EE_MAX; i++) {
+    uint8_t b = EEPROM.read(PIN_EE_ADDR + i);
+    if (b == 0x00 || b == 0xFF) break;
+    buf[i] = (char)b;
+  }
+  buf[i] = '\0';
+  return String(buf);
+}
+
+bool verifyPin(const String &entered) {
+  char buf[PIN_EE_MAX + 1];
+  int i = 0;
+  for (; i < PIN_EE_MAX; i++) {
+    uint8_t b = EEPROM.read(PIN_EE_ADDR + i);
+    if (b == 0x00 || b == 0xFF) break;
+    buf[i] = (char)b;
+  }
+  buf[i] = '\0';
+  String stored(buf);
+  return (entered == stored);
 }
 
 bool getPasswordsDoc(DynamicJsonDocument &doc) {
