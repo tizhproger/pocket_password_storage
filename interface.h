@@ -2,10 +2,10 @@
 #ifndef INTERFACE_H
 #define INTERFACE_H
 
-#include <Arduino.h> // для String!
+#include <Arduino.h>
 #include <ArduinoJson.h> 
-#include <vector>    // для std::vector
-#include <utility>   // для std::pair
+#include <vector>
+#include <utility>
 
 struct PasswordEntry {
   String site;
@@ -21,7 +21,8 @@ extern int passwordDetailIndex;
 extern bool showPassword;
 extern int passwordScreenState;
 extern const int MK_EE_ADDR;
-extern const int PIN_EE_ADDR;
+constexpr int PIN_EE_ADDR = 32;
+constexpr int PIN_EE_MAX  = 16;
 extern String apRandomPassword;
 
 void setupInterface();
