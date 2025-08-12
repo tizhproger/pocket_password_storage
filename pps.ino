@@ -22,19 +22,17 @@
 #define AES_KEY_SIZE 16
 #define FILE_NAME "/passwords.enc"
 
-// Состояние Wi-Fi
 enum WiFiState { WIFI_INIT, WIFI_CONNECTING, WIFI_CONNECTED, AP_MODE };
 
 static WiFiState wifiState = WIFI_INIT;
 static unsigned long wifiStartMillis = 0;
-static const unsigned long WIFI_TIMEOUT_MS = 10000; // 10 секунд
+static const unsigned long WIFI_TIMEOUT_MS = 10000;
 
 volatile bool rebootPending = false;
 
 String deviceSalt = "";
 String apRandomPassword = "";
 
-// Хранение конфигурации
 struct WiFiConfig {
   String ssid;
   String password;
@@ -268,7 +266,7 @@ bool loadPasswordsFromFile() {
   return true;
 }
 
-/* ---------- общая подпрограмма: грузим массив паролей ---------- */
+/* ---------- common routine: load password array ---------- */
 bool loadPasswordsArray(DynamicJsonDocument &doc) {
   doc.to<JsonArray>();
 
@@ -276,7 +274,7 @@ bool loadPasswordsArray(DynamicJsonDocument &doc) {
 
   File f = SPIFFS.open(FILE_NAME, "r");
   size_t sz = f.size();
-  if (sz <= 28) { f.close(); return true; } // 12 iv + 16 tag
+  if (sz <= 28) { f.close(); return true; }
 
   uint8_t iv[12], tag[16];
   f.read(iv,12); f.read(tag,16);
@@ -293,7 +291,6 @@ bool loadPasswordsArray(DynamicJsonDocument &doc) {
   return !err && doc.is<JsonArray>();
 }
 
-/* ---------- сохраняем массив обратно ---------- */
 bool savePasswordsArray(JsonArray arr) {
   String jsonStr;  serializeJson(arr, jsonStr);
 
@@ -303,8 +300,8 @@ bool savePasswordsArray(JsonArray arr) {
                   jsonStr.length(), cipher, iv, tag)) return false;
 
   File f = SPIFFS.open(FILE_NAME, "w");
-  f.write(iv, 12);                 // nonce
-  f.write(tag,16);                 // auth-tag
+  f.write(iv, 12);
+  f.write(tag,16);
   f.write(cipher.data(), cipher.size());
   f.close();
   return true;
@@ -312,7 +309,7 @@ bool savePasswordsArray(JsonArray arr) {
 
 bool loadSalt() {
   if (!SPIFFS.exists("/settings.json")) {
-    Serial.println("⚠️ settings.json не найден");
+    Serial.println("⚠️ settings.json not found");
     return false;
   }
 
@@ -322,17 +319,17 @@ bool loadSalt() {
   f.close();
 
   if (err) {
-    Serial.println("❌ Ошибка чтения settings.json");
+    Serial.println("❌ Error reading settings.json");
     return false;
   }
 
   if (!doc.containsKey("salt")) {
-    Serial.println("❌ В settings.json нет соли");
+    Serial.println("❌ There is no salt in settings.json");
     return false;
   }
 
   deviceSalt = doc["salt"].as<String>();
-  Serial.print("✅ Загрузили соль: ");
+  Serial.print("✅ Loaded salt: ");
   Serial.println(deviceSalt);
   return true;
 }
@@ -343,12 +340,12 @@ bool saveSalt(const String& salt) {
 
   File f = SPIFFS.open("/settings.json", "w");
   if (!f) {
-    Serial.println("❌ Не удалось открыть settings.json для записи");
+    Serial.println("❌ Failed to open settings.json for writing");
     return false;
   }
   serializeJson(doc, f);
   f.close();
-  Serial.println("✅ Соль сохранена в settings.json");
+  Serial.println("✅ Salt is saved in settings.json");
   return true;
 }
 
@@ -360,18 +357,18 @@ bool deriveKeyFromPassword(const String& password, const String& saltHex, uint8_
   }
 
   int ret = mbedtls_pkcs5_pbkdf2_hmac_ext(
-    MBEDTLS_MD_SHA256,                             // тип хеша
-    (const unsigned char*)password.c_str(), password.length(), // пароль
-    saltBytes, sizeof(saltBytes),                  // соль
-    50000,                                          // итерации
-    outLen,                                         // длина выходного ключа
-    output                                          // буфер для результата
+    MBEDTLS_MD_SHA256,
+    (const unsigned char*)password.c_str(), password.length(),
+    saltBytes, sizeof(saltBytes),
+    50000,
+    outLen,
+    output
   );
 
   return (ret == 0);
 }
 
-// --- считываем настройки из SPIFFS (вызывать один раз в setup) ---
+// --- read settings from SPIFFS (call once in setup) ---
 void loadWiFiConfig() {
   if (!SPIFFS.exists("/settings.json")) {
     wifiCfg = { "", "" };
@@ -385,18 +382,18 @@ void loadWiFiConfig() {
       wifiCfg.ssid     = doc["ssid"].as<String>();
       wifiCfg.password = doc["password"].as<String>();
       wifiCfg.ap_ssid = doc["ap_ssid"] | "";
-      wifiCfg.ap_password = doc["ap_password"] | ""; // по умолчанию пусто
+      wifiCfg.ap_password = doc["ap_password"] | "";
       wifiCfg.wifi_mode = doc["wifi_mode"] | "";
     } else {
-      wifiCfg = { "", "" }; // 👈 если нет Wi-Fi настроек, сбрасываем
+      wifiCfg = { "", "" };
     }
   } else {
-    wifiCfg = { "", "" }; // 👈 если ошибка чтения
+    wifiCfg = { "", "" };
   }
   f.close();
 }
 
-// --- инициализация Wi-Fi, вызывается из setup() ---
+// --- Wi-Fi initialization, called from setup() ---
 void initWiFi() {
   loadWiFiConfig();
 
@@ -407,7 +404,6 @@ void initWiFi() {
     wifiState = WIFI_CONNECTING;
     wifiStartMillis = millis();
   } else {
-    // нет сохранённых данных — сразу в AP
     WiFi.mode(WIFI_AP);
     delay(100); 
     Serial.println("📡 Starting AP");
@@ -425,13 +421,13 @@ void initWiFi() {
 
 bool isKeyValid() {
   if (!server.hasHeader("Authorization")) {
-    Serial.println("[Auth] ❌ Нет заголовка Authorization");
+    Serial.println("[Auth] ❌ No Authorization header");
     return false;
   }
 
   String key = server.header("Authorization");
   if (key.length() != 32) {
-    Serial.println("[Auth] ❌ Длина ключа не 32 символа");
+    Serial.println("[Auth] ❌ Key length is not 32 characters");
     return false;
   }
 
@@ -444,33 +440,30 @@ bool isKeyValid() {
     uint8_t byte = strtoul(byteStr, nullptr, 16);
 
     if (master_key[i] != byte) {
-      Serial.println("[Auth] ❌ Несовпадение байта → отказ");
+      Serial.println("[Auth] ❌ Byte mismatch → failure");
       return false;
     }
   }
 
-  Serial.println("[Auth] ✅ Пароль принят");
+  Serial.println("[Auth] ✅ Password accepted");
   return true;
 }
 
-// --- проверка и перевод между состояниями, вызывается в loop() ---
+// --- checking and switching between states, called in loop() ---
 void handleWiFi() {
   switch (wifiState) {
     case WIFI_CONNECTING:
-      // если подключились раньше таймаута
       if (WiFi.status() == WL_CONNECTED) {
         Serial.println("\n✅ Wi-Fi connected!");
         Serial.print("📡 IP: "); Serial.println(WiFi.localIP());
         wifiState = WIFI_CONNECTED;
       }
-      // если вышли за таймаут и ещё не подключены
       else if (millis() - wifiStartMillis > WIFI_TIMEOUT_MS) {
         Serial.println("\n❌ Wi-Fi timeout, switching to AP");
         WiFi.softAP("PPS-Setup");
         Serial.print("📶 AP IP: "); Serial.println(WiFi.softAPIP());
         wifiState = AP_MODE;
       } else {
-        // печатаем точки не чаще, чем каждые 500 мс
         static unsigned long lastDot = 0;
         if (millis() - lastDot > 500) {
           Serial.print('.');
@@ -480,7 +473,6 @@ void handleWiFi() {
       break;
 
     case WIFI_CONNECTED:
-      // здесь можно отслеживать разрыв и переход обратно в AP, если нужно
       if (WiFi.status() != WL_CONNECTED) {
         Serial.println("⚠️ Wi-Fi lost, restarting AP");
         WiFi.softAP("PPS-Setup");
@@ -491,7 +483,6 @@ void handleWiFi() {
       break;
 
     case AP_MODE:
-      // при желании можно следить за появлением сохранённых creds и пытаться STA
       break;
 
     default:
@@ -562,7 +553,7 @@ void handleGetSettings() {
     f.close();
     if (err) doc.clear();
   }
-  // формируем ответ
+
   StaticJsonDocument<256> out;
   out["ssid"]        = doc["ssid"]        | "";
   out["password"]    = doc["password"]    | "";
@@ -597,7 +588,6 @@ void handleSaveSettings() {
   auto err = deserializeJson(newDoc, server.arg("plain"));
   if (err) return server.send(400, "text/plain", "Invalid JSON");
 
-  // Обновляем только те поля, которые пришли
   if (newDoc.containsKey("ssid")) {
     currentDoc["ssid"] = newDoc["ssid"];
   }
@@ -611,7 +601,6 @@ void handleSaveSettings() {
     currentDoc["ap_password"] = newDoc["ap_password"];
   }
 
-  // Сохраняем обратно
   File f = SPIFFS.open("/settings.json", "w");
   if (!f) return server.send(500, "text/plain", "FS error");
   serializeJson(currentDoc, f);
@@ -659,19 +648,16 @@ void handleAddPassword() {
     server.send(400, "text/plain", "No data"); return;
   }
 
-  /* 1. Разбираем новую запись */
   StaticJsonDocument<256> newEntry;
   if (deserializeJson(newEntry, server.arg("plain")) || !newEntry.is<JsonObject>()){
     server.send(400, "text/plain", "Invalid JSON");  return;
   }
 
-  /* 2. Грузим текущий массив */
   DynamicJsonDocument doc(4096);
   if (!loadPasswordsArray(doc)) {
     server.send(500, "text/plain", "Decrypt error"); return;
   }
 
-  /* 3. Добавляем и сохраняем */
   JsonArray arr = doc.as<JsonArray>();
   arr.add(newEntry);
 
@@ -711,7 +697,7 @@ void handleDeletePassword() {
   server.send(200, "text/plain", "OK");
 }
 
-/* ---------- POST /editPassword  body: {index: n, … поля …} ----- */
+/* ---------- POST /editPassword  body: {index: n, … fields …} ----- */
 void handleEditPassword() {
   if (server.hasHeader("Origin")) {
       String o = server.header("Origin");
@@ -725,7 +711,6 @@ void handleEditPassword() {
   if (!isAuthorized()) { server.send(401); return; }
   if (!server.hasArg("plain"))       { server.send(400, "text/plain", "No data");     return; }
 
-  /* читаем данные и index */
   StaticJsonDocument<512> upd;
   if (deserializeJson(upd, server.arg("plain"))) {
       server.send(400, "text/plain", "Invalid JSON"); return;
@@ -736,7 +721,6 @@ void handleEditPassword() {
       server.send(400, "text/plain", "Bad data"); return;
   }
 
-  /* получаем массив и валидируем индекс единым способом */
   DynamicJsonDocument doc(4096);
   if (!getPasswordsDoc(doc)) return;
   JsonArray arr = doc.as<JsonArray>();
@@ -751,7 +735,7 @@ void handleEditPassword() {
   server.send(200, "text/plain", "OK");
 }
 
-/* ====== GET  /exportPasswords  — выгрузка JSON-массива ========= */
+/* ====== GET  /exportPasswords ========= */
 void handleExportPasswords() {
   if (server.hasHeader("Origin")) {
       String o = server.header("Origin");
@@ -769,12 +753,12 @@ void handleExportPasswords() {
     server.send(500, "text/plain", "Decrypt error"); return;
   }
 
-  String out;                // отдаём в чистом виде, без шифрования
+  String out;
   serializeJson(doc, out);
   server.send(200, "application/json", out);
 }
 
-/* ====== POST /importPasswords  — полная замена базы ============ */
+/* ====== POST /importPasswords ============ */
 void handleImportPasswords() {
   if (server.hasHeader("Origin")) {
       String o = server.header("Origin");
@@ -810,7 +794,7 @@ void handleImportPasswords() {
 
 void handleLogin() {
   if (!server.hasArg("plain")) {
-    server.send(400, "text/plain", "Нет данных");
+    server.send(400, "text/plain", "No data");
     return;
   }
 
@@ -819,36 +803,35 @@ void handleLogin() {
   StaticJsonDocument<256> doc;
   DeserializationError err = deserializeJson(doc, server.arg("plain"));
   if (err) {
-    server.send(400, "text/plain", "Неверный JSON");
+    server.send(400, "text/plain", "Invalid JSON");
     return;
   }
 
   String password = doc["password"];
   if (password.length() < 4) {
-    server.send(400, "text/plain", "Пароль слишком короткий");
+    server.send(400, "text/plain", "Password too short");
     return;
   }
 
   uint8_t testKey[16];
   if (!deriveKeyFromPassword(password, deviceSalt, testKey, 16)) {
-    server.send(500, "text/plain", "Ошибка PBKDF2");
+    server.send(500, "text/plain", "Error PBKDF2");
     return;
   }
 
-  // Сравниваем полученный ключ с сохранённым master_key[]
   for (int i = 0; i < 16; i++) {
     if (master_key[i] != testKey[i]) {
-      Serial.println("❌ Неверный пароль");
+      Serial.println("❌ Invalid password");
       failCount++;
       if (failCount>4) {
-        blockUntil = millis()+ (1<<failCount)*1000; // 2-4-8-16 с
+        blockUntil = millis()+ (1<<failCount)*1000;
       }
-      server.send(401, "text/plain", "Неверный пароль");
+      server.send(401, "text/plain", "Invalid password");
       return;
     }
   }
 
-  Serial.println("✅ Успешный вход");
+  Serial.println("✅ Succesful login");
   purgeSessions();
   String tok = newToken();
   sessions.push_back({ tok, millis()+30*60*1000UL }); // 30 мин
@@ -869,11 +852,8 @@ String getContentType(const String& path) {
 void handleFileRead() {
   String path = server.uri();
 
-  /* ➊  Корневой запрос → index.html */
   if (path == "/") path = "/index.html";
 
-  /* ➋  Пока устройство не инициализировано – отдаём init.html,
-         кроме css/js/json, чтобы страница могла загрузиться  */
   if (initialSetup) {
     if (!(path.endsWith(".css") || path.endsWith(".js") ||
           path.endsWith(".json") || path == "/initKey"))
@@ -886,8 +866,7 @@ void handleFileRead() {
     }
   }
 
-  /* ➍  Отдаём статический файл (css/js/html/…) */
-  if (!SPIFFS.exists(path)) {          // на всякий случай 404
+  if (!SPIFFS.exists(path)) {
     server.send(404, "text/plain", "File not found");
     return;
   }
@@ -908,40 +887,39 @@ void handleInitKey() {
   }
 
   if (!server.hasArg("plain")) {
-    server.send(400, "text/plain", "Нет данных");
+    server.send(400, "text/plain", "No data");
     return;
   }
 
   StaticJsonDocument<256> doc;
   DeserializationError err = deserializeJson(doc, server.arg("plain"));
   if (err) {
-    server.send(400, "text/plain", "Неверный JSON");
+    server.send(400, "text/plain", "Invalid JSON");
     return;
   }
 
   String password = doc["password"];
   if (password.length() < 4) {
-    server.send(400, "text/plain", "Пароль слишком короткий");
+    server.send(400, "text/plain", "Password too short");
     return;
   }
 
   uint8_t derivedKey[16];
   if (!deriveKeyFromPassword(password, deviceSalt, derivedKey, 16)) {
-    server.send(500, "text/plain", "Ошибка PBKDF2");
+    server.send(500, "text/plain", "Error PBKDF2");
     return;
   }
 
-  // Сохраняем Derived Key в EEPROM
   for (int i = 0; i < 16; i++) {
     EEPROM.write(MK_EE_ADDR + i, derivedKey[i]);
   }
   EEPROM.commit();
 
-  Serial.println("✅ Мастер-ключ сохранён");
+  Serial.println("✅ Master-key saved");
 
-  server.send(200, "text/plain", "Мастер-пароль установлен");
+  server.send(200, "text/plain", "Master password set");
 
-  Serial.println("⌛ Ожидание 3 секунды перед перезапуском...");
+  Serial.println("⌛ Waiting 3 seconds before restarting...");
   delay(3000);
   ESP.restart();
 }
@@ -977,7 +955,6 @@ void handleChangeMasterKey() {
     return;
   }
 
-  // Проверяем старый ключ
   for (int i = 0; i < 16; i++) {
     char byteStr[3] = { (char)tolower(oldKey[i * 2]), (char)tolower(oldKey[i * 2 + 1]), 0 };
     uint8_t byte = strtoul(byteStr, nullptr, 16);
@@ -987,7 +964,6 @@ void handleChangeMasterKey() {
     }
   }
 
-  // Записываем новый ключ
   for (int i = 0; i < 16; i++) {
     char byteStr[3] = { (char)tolower(newKey[i * 2]), (char)tolower(newKey[i * 2 + 1]), 0 };
     master_key[i] = strtoul(byteStr, nullptr, 16);
@@ -1083,9 +1059,8 @@ void setup() {
   }
   Serial.println("✅ SPIFFS mounted");
   
-  // Проверка наличия соли
   if (!loadSalt()) {
-    Serial.println("⚠️ Соль не найдена, создаём новую...");
+    Serial.println("⚠️ Salt not found, creating a new one...");
     String newSalt = generateRandomSalt(16);
     saveSalt(newSalt);
     deviceSalt = newSalt;
@@ -1102,7 +1077,7 @@ void setup() {
 }
 
 void loop() {
-  handleInterface();  // обновление интерфейса
+  handleInterface();
   server.handleClient();
   handleWiFi();
 
@@ -1111,7 +1086,7 @@ void loop() {
   }
 
   if (rebootPending) {
-    delay(50);        // give the client time to receive the “OK”
-    ESP.restart();    // now do it safely from the main loop
+    delay(50);
+    ESP.restart();
   }
 }
