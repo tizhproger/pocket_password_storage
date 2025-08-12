@@ -14,6 +14,8 @@
 #include <mbedtls/platform_util.h>
 #include "esp_sleep.h"
 #include "driver/gpio.h"
+#include <WebServer.h>
+#include <DNSServer.h>
 
 // joystick and screen pins (commented ones for TTGO ESP32 TFT)
 #define UP_PIN       8 //2
@@ -44,6 +46,9 @@ const int menuSize = sizeof(menuItems)/sizeof(menuItems[0]);
 static bool batteryDrawn = false;
 static unsigned long lastUpdate = 0;
 
+extern WebServer server;
+extern DNSServer dnsServer;
+
 enum AppState {
   ST_LOCKED,
   ST_UNLOCK_PROMPT,
@@ -62,6 +67,94 @@ enum AppState {
 };
 
 enum WiFiModeOption { UI_WIFI_STA, UI_WIFI_AP };
+
+// === Helpers for Wi‑Fi mode screen ===
+static WiFiModeOption getRuntimeWiFiMode() {
+  wifi_mode_t m = WiFi.getMode();  // WIFI_MODE_NULL/STA/AP/APSTA
+  if (m == WIFI_MODE_STA || m == WIFI_MODE_APSTA) return UI_WIFI_STA;
+  if (m == WIFI_MODE_AP) return UI_WIFI_AP;
+  return UI_WIFI_STA;
+}
+
+static WiFiModeOption getConfiguredWiFiMode() {
+  DynamicJsonDocument doc(256);
+  if (!loadJsonFromFile("/settings.json", doc)) return UI_WIFI_STA;
+  String s;
+  if (doc.containsKey("wifi_mode")) s = doc["wifi_mode"].as<String>();
+  else if (doc.containsKey("mode")) s = doc["mode"].as<String>();
+  else s = "wifi";
+  s.toLowerCase();
+  return (s == "ap") ? UI_WIFI_AP : UI_WIFI_STA;
+}
+// ====================================
+
+// ---- Runtime Wi‑Fi switch helpers (no reboot) ----
+static void stopNetServices() {
+  dnsServer.stop();
+  server.stop();
+}
+
+static void startNetServices(bool apMode) {
+  if (apMode) {
+    dnsServer.start(53, "*", IPAddress(192,168,4,1));
+  }
+  server.begin();
+}
+
+static bool switchToSTA() {
+  DynamicJsonDocument doc(512);
+  if (!loadJsonFromFile("/settings.json", doc)) return false;
+  String ssid = doc.containsKey("ssid")     ? String(doc["ssid"].as<const char*>())     : "";
+  String pass = doc.containsKey("password") ? String(doc["password"].as<const char*>()) : "";
+
+  if (!ssid.length()) return false;
+
+  stopNetServices();
+
+  WiFi.softAPdisconnect(true);
+  WiFi.disconnect(true, true);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid.c_str(), pass.c_str());
+
+  uint32_t t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && (millis() - t0) < 12000) {
+    delay(100);
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    WiFi.disconnect(true, true);
+    return false;
+  }
+
+  startNetServices(false);
+  return true;
+}
+
+static bool switchToAP() {
+  DynamicJsonDocument doc(512);
+  loadJsonFromFile("/settings.json", doc);
+
+  String apSsid = (doc.containsKey("ap_ssid")     ? String(doc["ap_ssid"].as<const char*>())     : "");
+  String apPass = (doc.containsKey("ap_password") ? String(doc["ap_password"].as<const char*>()) : "");
+
+  if (apSsid.length() == 0) apSsid = generateRandomSSID();
+  if (apPass.length() < 8)  apPass = generateRandomPassword(8);
+
+  stopNetServices();
+
+  WiFi.disconnect(true, true);
+  WiFi.mode(WIFI_AP);
+  bool ok = WiFi.softAP(apSsid.c_str(), apPass.c_str());
+
+  startNetServices(true);
+  return ok;
+}
+
+static bool applyWiFiModeRuntime(WiFiModeOption m) {
+  if (m == UI_WIFI_STA) return switchToSTA();
+  if (m == UI_WIFI_AP)  return switchToAP();
+  return false;
+}
+// ---------------------------------------------------
 
 static WiFiModeOption wifiModeSelection = UI_WIFI_STA;
 static int pageOffset = 0;
@@ -86,6 +179,7 @@ static char current = '0';
 
 // edge-detector for buttons (active LOW)
 static bool selLatched = false;
+static bool rightLatched = false;
 static inline bool justPressed(int pin, bool &latched) {
   bool now = (digitalRead(pin) == LOW);
   if (now && !latched) { latched = true; return true; }
@@ -575,8 +669,8 @@ void showAboutScreen(){
     tft.setTextColor(ST77XX_WHITE);
 
     tft.setCursor(10, 10); tft.print("PocketPasswordStorage");
-    tft.setCursor(10, 30); tft.print("v1.2.0");
-    tft.setCursor(10, 50); tft.print("(c) 2025 by Zeus");
+    tft.setCursor(10, 30); tft.print("v1.2.1");
+    tft.setCursor(10, 50); tft.print("(c) 2025 by tizhproger");
 
     tft.setCursor(10, 70); tft.print("< Back");
   }
@@ -594,7 +688,13 @@ void showAboutScreen(){
 void showWiFiModeScreen() {
   static bool first = true;
   if (first || redraw) {
-    first = false;
+    WiFiModeOption runtime  = getRuntimeWiFiMode();
+    WiFiModeOption config   = getConfiguredWiFiMode();
+
+    if (first) {
+      wifiModeSelection = runtime;
+      first = false;
+    }
     redraw = false;
 
     tft.fillScreen(ST77XX_BLACK);
@@ -603,19 +703,28 @@ void showWiFiModeScreen() {
     tft.setCursor(10, 10);
     tft.print("Wi-Fi Mode:");
 
-    tft.setTextSize(1);
+    // Wi‑Fi (STA)
     tft.setCursor(10, 30);
     tft.setTextColor(wifiModeSelection == UI_WIFI_STA ? ST77XX_YELLOW : ST77XX_WHITE);
     tft.print("> Wi-Fi");
+    tft.setTextColor(ST77XX_GREEN);
+    if (runtime == UI_WIFI_STA) { tft.print(" [ACTIVE]"); }
+    tft.setTextColor(ST77XX_BLUE);
+    if (config  == UI_WIFI_STA)  { tft.print(" [CONFIG]"); }
 
+    // AP
     tft.setCursor(10, 50);
     tft.setTextColor(wifiModeSelection == UI_WIFI_AP ? ST77XX_YELLOW : ST77XX_WHITE);
     tft.print("> AP");
-
+    tft.setTextColor(ST77XX_GREEN);
+    if (runtime == UI_WIFI_AP) { tft.print(" [ACTIVE]"); }
+    tft.setTextColor(ST77XX_BLUE);
+    if (config  == UI_WIFI_AP)  { tft.print(" [CONFIG]"); }
+    
     tft.setTextColor(ST77XX_WHITE);
     tft.setTextSize(1);
     tft.setCursor(10, 70);
-    tft.print("< Back");
+    tft.print("< Back   RIGHT: Save def.");
   }
 
   if (digitalRead(UP_PIN) == LOW || digitalRead(DOWN_PIN) == LOW) {
@@ -625,14 +734,28 @@ void showWiFiModeScreen() {
   }
 
   if (justPressed(SELECT_PIN, selLatched)) {
-    saveWiFiModeToSettings(wifiModeSelection == UI_WIFI_STA ? "wifi" : "ap");
+    WiFiModeOption runtime = getRuntimeWiFiMode();
+    if (wifiModeSelection == runtime) {
+      tft.fillScreen(ST77XX_BLACK);
+      tft.setCursor(10, 40);
+      tft.setTextColor(ST77XX_YELLOW);
+      tft.setTextSize(1);
+      tft.print("Already active");
+      delay(900);
+      redraw = true;
+      return;
+    }
+
+    bool ok = applyWiFiModeRuntime(wifiModeSelection);
+
     tft.fillScreen(ST77XX_BLACK);
     tft.setCursor(10, 40);
-    tft.setTextColor(ST77XX_YELLOW);
-    tft.setTextSize(2);
-    tft.print("Restarting...");
-    delay(800);
-    ESP.restart();
+    tft.setTextColor(ok ? ST77XX_GREEN : ST77XX_RED);
+    tft.setTextSize(1);
+    tft.print(ok ? "Mode switched" : "Switch failed");
+    delay(900);
+
+    redraw = true;
   }
 
   if (digitalRead(LEFT_PIN) == LOW) {
@@ -641,6 +764,19 @@ void showWiFiModeScreen() {
     redraw = true;
     first = true;
     delay(200);
+  }
+
+  if (justPressed(RIGHT_PIN, rightLatched)) {
+    saveWiFiModeToSettings(wifiModeSelection == UI_WIFI_STA ? "wifi" : "ap");
+
+    tft.fillScreen(ST77XX_BLACK);
+    tft.setCursor(10, 40);
+    tft.setTextColor(ST77XX_GREEN);
+    tft.setTextSize(1);
+    tft.print("Saved as default");
+    delay(800);
+
+    redraw = true;
   }
 }
 
