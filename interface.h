@@ -29,7 +29,7 @@ void setupInterface();
 void handleInterface();
 String getApPassword();
 String generateRandomSSID();
-String generateRandomPassword();
+String generateRandomPassword(int length);
 
 // новые экраны
 bool loadPasswordsFromFile();
