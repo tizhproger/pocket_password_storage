@@ -45,6 +45,7 @@ const int menuSize = sizeof(menuItems)/sizeof(menuItems[0]);
 
 static bool batteryDrawn = false;
 static unsigned long lastUpdate = 0;
+static const int MAX_FAILED_ATTEMPTS = 10;
 
 extern WebServer server;
 extern DNSServer dnsServer;
@@ -180,6 +181,7 @@ static char current = '0';
 // edge-detector for buttons (active LOW)
 static bool selLatched = false;
 static bool rightLatched = false;
+
 static inline bool justPressed(int pin, bool &latched) {
   bool now = (digitalRead(pin) == LOW);
   if (now && !latched) { latched = true; return true; }
@@ -197,6 +199,16 @@ bool loadJsonFromFile(const char* path, DynamicJsonDocument& doc) {
   DeserializationError error = deserializeJson(doc, file);
   file.close();
   return !error;
+}
+
+static void factoryResetAuto() {
+  for (int i = 0; i < 128; i++) EEPROM.write(i, 0xFF);
+  EEPROM.commit();
+  SPIFFS.format();
+  pinBuffer = "";
+  confirmBuffer = "";
+  passwordEntries.clear();
+  ESP.restart();
 }
 
 bool saveJsonToFile(const char* path, const DynamicJsonDocument& doc) {
@@ -307,15 +319,20 @@ void handleInterface() {
       delay(200);
     }
     if (digitalRead(LEFT_PIN) == LOW && pinPos > 0) {
+      int oldPos = pinPos;
       pinPos--;
+
       char last = pinBuffer[pinPos];
       pinBuffer.remove(pinPos);
+
+      tft.fillRect(10 + oldPos*15, 50, 15, 20, ST77XX_BLACK);
 
       current = last;
       tft.fillRect(10 + pinPos*15, 50, 15, 20, ST77XX_BLACK);
       tft.setCursor(10 + pinPos*15, 50);
       tft.setTextColor(ST77XX_YELLOW);
       tft.print(current);
+
       delay(200);
     }
     if (justPressed(SELECT_PIN, selLatched)) {
@@ -346,10 +363,27 @@ void handleInterface() {
         failedAttempts = 0;
       } else {
         failedAttempts++;
+
         tft.fillScreen(ST77XX_RED);
         tft.setCursor(10, 30);
         tft.print("Wrong PIN!");
+        tft.setCursor(10, 50);
+        tft.print("Left: ");
+        tft.print(MAX_FAILED_ATTEMPTS - failedAttempts);
         delay(1000);
+
+        if (failedAttempts >= MAX_FAILED_ATTEMPTS) {
+          tft.fillScreen(ST77XX_BLACK);
+          tft.setTextColor(ST77XX_YELLOW);
+          tft.setCursor(10, 30);
+          tft.print("Too many tries");
+          tft.setCursor(10, 50);
+          tft.print("Wiping data...");
+          delay(1200);
+          factoryResetAuto();
+          return;
+        }
+
         if (failedAttempts >= 3) {
           lockUntil = millis() + (1UL << failedAttempts) * 1000UL;
           state = ST_LOCKED;
@@ -374,7 +408,6 @@ void handleInterface() {
       state = ST_UNLOCK_PROMPT;
       swallowHeldSelect();
       redraw = true;
-      failedAttempts = 0;
     }
     return;
   }
@@ -547,15 +580,20 @@ void handleInterface() {
       delay(200);
     }
     if (digitalRead(LEFT_PIN) == LOW && pinPos > 0) {
+      int oldPos = pinPos;
       pinPos--;
+
       char last = pinBuffer[pinPos];
       pinBuffer.remove(pinPos);
+
+      tft.fillRect(10 + oldPos*15, 50, 15, 20, ST77XX_BLACK);
 
       current = last;
       tft.fillRect(10 + pinPos*15, 50, 15, 20, ST77XX_BLACK);
       tft.setCursor(10 + pinPos*15, 50);
       tft.setTextColor(ST77XX_YELLOW);
       tft.print(current);
+
       delay(200);
     }
     if (justPressed(SELECT_PIN, selLatched)) {
@@ -669,7 +707,7 @@ void showAboutScreen(){
     tft.setTextColor(ST77XX_WHITE);
 
     tft.setCursor(10, 10); tft.print("PocketPasswordStorage");
-    tft.setCursor(10, 30); tft.print("v1.2.1");
+    tft.setCursor(10, 30); tft.print("v1.3.1");
     tft.setCursor(10, 50); tft.print("(c) 2025 by tizhproger");
 
     tft.setCursor(10, 70); tft.print("< Back");
@@ -849,6 +887,7 @@ void showBatteryScreen() {
 
 void showSleepModeScreen() {
   static bool first = true;
+  static WiFiModeOption prevMode;
 
   if (first || redraw) {
     first = false;
@@ -872,6 +911,7 @@ void showSleepModeScreen() {
     tft.print("Sleeping...");
     delay(300);
 
+    prevMode = getRuntimeWiFiMode();
     WiFi.mode(WIFI_OFF);
     btStop();
 
@@ -882,6 +922,10 @@ void showSleepModeScreen() {
 
     gpio_wakeup_disable((gpio_num_t)SELECT_PIN);
     delay(120);
+
+    if (prevMode == UI_WIFI_AP || prevMode == UI_WIFI_STA) {
+      applyWiFiModeRuntime(prevMode);
+    }
 
     state = ST_MENU;
     swallowHeldSelect();
@@ -1004,19 +1048,14 @@ void showPasswordsScreen(){
           y += 16;
           if (y > 78) break;
         }
-        tft.setCursor(4, 68); tft.setTextColor(ST77XX_WHITE); tft.print("Hold SELECT: Show");
-        tft.setCursor(4, 78); tft.print("< Back");
+        tft.setCursor(4, 68); tft.setTextColor(ST77XX_WHITE); tft.print("< Back  Hold SELECT: Show");
         redraw = false;
       }
 
-      if (justPressed(SELECT_PIN, selLatched)) {
-        if (!showPassword) {
-          showPassword = true;
-          redraw = true;
-        }
-      } else if (showPassword) {
-        showPassword = false;
-        redraw = true;
+      if (digitalRead(SELECT_PIN) == LOW) {
+        if (!showPassword) { showPassword = true; redraw = true; }
+      } else {
+        if (showPassword) { showPassword = false; redraw = true; }
       }
 
       if (digitalRead(LEFT_PIN)==LOW) {
