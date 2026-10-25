@@ -80,13 +80,6 @@ tools/
   make_font.py                 Optional font-header generator (Pillow)
 third_party/
   DejaVu-LICENSE.txt           Font attribution/license
-docs/
-  ARCHITECTURE.md              Architecture and security limits
-  FORMAT_AND_USB.md            Exact snapshot and USB wire format
-  BOARD_TESTS.md               Hardware test plan (not executed)
-  SOURCE_REVIEW.md             Scope and results of code review
-  partitions-no-coredump-4MB-example.csv
-  source_ru/                   Original Russian documents
 README.md                     This English guide
 ```
 
@@ -204,8 +197,6 @@ Select **Encrypted backup** on the device even while it is locked. This grants o
 When a newer generation was interrupted, the vault enters **`Recovery required`**. After owner-code entry, the last complete snapshot is available **read-only**, including a ciphertext-only backup, but regular modifications are blocked. A separate **Repair interrupted write** action, with confirmation, publishes a new verified generation based on the valid data. If every snapshot or SPIFFS itself is corrupt, recovery requires an **external backup**. Normally retaining three generations on one filesystem does not protect against a failure of that filesystem.
 
 ## Security architecture and limitations
-
-This summarizes [Architecture and threat model](docs/ARCHITECTURE.md). The mechanisms were cross-checked against `solo_core.cpp`, `solo_engine.cpp`, `solo_wire.cpp`, `solo_platform.h`, and `solo_app.cpp`, but **this limited review is not a comprehensive security audit or certification**.
 
 | Mechanism | Design in 0.1.0 |
 | --- | --- |
