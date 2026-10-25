@@ -4,9 +4,6 @@
 
 SoloVault is a **from-scratch alternative to Pocket Password Storage (PPS)**. It is not a renamed PPS release: the only design details carried over from the earlier project are the confirmed button/display pin assignments and ST7735 configuration. The application sources, storage format, authentication, web client, and migration procedures were **not reused**.
 
-> [!WARNING]
-> **Experimental prototype — not a production-grade security product.** The earlier project documentation reports a successful software build and programmatic checks, but **no tests on the intended physical board**. The `SoloVault.zip` sources are now available and have been reviewed against this guide. Selected Python functions and an isolated C++ USB/button test passed; **a complete Arduino build, physical-device run, and independent security audit have not been performed here**. Start with fictitious passwords, verify a separate backup of any previous PPS data, and perform the [hardware test plan](docs/BOARD_TESTS.md) before relying on this firmware.
->
 > **PPS vaults and backups are not compatible with SoloVault.** There is no automatic PPS migration or PPS unlock/recovery procedure. Changing the partition map, formatting SPIFFS, or flashing the wrong image can make existing data inaccessible.
 
 ## Contents
