@@ -4,6 +4,12 @@
 
 Pocket Password Storage is a small, locally operated password manager built around an ESP32 and a TFT display. Passwords are held in encrypted flash storage, accessed using the device's physical controls or over its local HTTPS interface. It does not require a cloud account or an Internet connection; Wi-Fi is used for local access.
 
+> [!NOTE]
+> Most of the code was written with `ChatGPT`, namely `o3` and `4o` models.
+> Code was tested on testboard `(ESP32C3 + Air101-LCD)` and edited/fixed by myself when needed.
+>
+> All development further is made with `GPT 5` and then continued with `GPT 6 Astra Max`
+
 > [!WARNING]
 > **Experimental proof of concept, not a production-grade security product.** The project has not undergone an independent security audit. Hardware behavior, entropy quality, recovery, and current browser/SDK compatibility have not been comprehensively tested. A vault containing important passwords must have independently verified external backups. The software is provided **as is**, without a warranty; you use it at your own risk.
 >
@@ -22,8 +28,6 @@ Pocket Password Storage is a small, locally operated password manager built arou
 - [Migration, rollback, and recovery](#migration-rollback-and-recovery)
 
 ## Project history and alternatives
-
-The original project was created by **[tizhproger](https://github.com/tizhproger/pocket_password_storage)**. Its early code was developed with ChatGPT **o3** and **4o** assistance, then continued with **GPT 5**, alongside manual adjustments and testing by the author on an **ESP32-C3 + Air101-LCD** test board. The subsequent substantial redevelopment of PPS is credited by the maintainer to **GPT 6 Astra Max**. AI assistance does **not** constitute independent verification of security or correctness.
 
 The version advanced to **2.1.3** because the cumulative changes were extensive: storage and recovery rework, tighter validation and memory handling, updated Arduino/cryptography/JSON integrations, TLS handling, and changes to the Web UI and development tooling. This is **not** just a cosmetic version bump or a minor patch. The version in the supplied source is `Config::VERSION = "2.1.3"` in `PPS/config.h`.
 
