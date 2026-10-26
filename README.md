@@ -409,3 +409,22 @@ PPS 2.1.3 can read protected **v2** vault storage. The **first successful write*
 | **Unrecoverable corruption** | Press **DOWN** on the error screen and complete **two physical reset confirmations**, only after accepting data loss or exhausting external recovery options. This is logical deletion, not physical sanitization. |
 
 The previous snapshot may survive only until the **next write attempt**, including changing a password or importing; **even a failed write can damage the backup slot** while leaving the active slot intact. Make an **external backup before importing**. If post-write metadata verification is ambiguous, the vault blocks writes: restart and inspect its state before taking further action.
+
+
+License
+
+Pocket Password Storage (PPS) is licensed under the MIT License with Commons Clause v1.0.
+
+You are free to:
+
+- View and study the source code.
+- Use and modify the software.
+- Fork and redistribute the software under the same licensing terms.
+
+Commercial restrictions:
+
+Selling the software, its modified versions, or services whose value derives substantially from the software's functionality is prohibited without prior permission from the copyright holder.
+
+For the complete license terms, see "LICENSE.txt" (./LICENSE.txt).
+
+Copyright (c) 2026 tizhproger. All rights reserved under the applicable license terms.
