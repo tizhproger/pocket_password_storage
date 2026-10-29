@@ -460,7 +460,7 @@ PPS 2.1.3 can read protected **v2** vault storage. The **first successful write*
 
 The previous snapshot may survive only until the **next write attempt**, including changing a password or importing; **even a failed write can damage the backup slot** while leaving the active slot intact. Make an **external backup before importing**. If post-write metadata verification is ambiguous, the vault blocks writes: restart and inspect its state before taking further action.
 
-License
+## License
 
 Pocket Password Storage (PPS) is licensed under the MIT License with Commons Clause v1.0.
 
