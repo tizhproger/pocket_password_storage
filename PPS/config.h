@@ -19,7 +19,7 @@ constexpr size_t MAX_ENTRIES=PPS_MAX_ENTRIES, MAX_EXTRAS=8;
 constexpr uint32_t KDF_ROUNDS=120000;
 constexpr uint64_t AUTOLOCK_MS=120000, SESSION_MS=1800000, SETUP_MS=180000;
 constexpr uint64_t BOOT_LOGO_MS=1500;
-constexpr const char* VERSION="2.1.3";
+constexpr const char* VERSION="2.1.4";
 }
 
 #endif
