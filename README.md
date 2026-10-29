@@ -17,6 +17,7 @@ Pocket Password Storage is a small, locally operated password manager built arou
 
 ## Contents
 
+- [Test board and UI](#test-board-and-ui)
 - [Project history and alternatives](#project-history-and-alternatives)
 - [Repository layout](#repository-layout)
 - [Hardware and build requirements](#hardware-and-build-requirements)
@@ -26,6 +27,61 @@ Pocket Password Storage is a small, locally operated password manager built arou
 - [Device-specific TLS trust](#device-specific-tls-trust)
 - [TLS maintenance and troubleshooting](#tls-maintenance-and-troubleshooting)
 - [Migration, rollback, and recovery](#migration-rollback-and-recovery)
+
+## Test board and UI
+
+<details>
+
+<summary>Pinout for LUATOS ESP32-C3 + Air101-LCD</summary>
+
+### Here is the pinout of both boards. In case you need it for further development.
+
+![Air101-LCD pinout](images/pinout/Air101-LCD_pinout.png)
+
+![LCD pinout (from Air101-LCD)](images/pinout/LCD_pinout.png)
+
+![LUATOS ESP32-C3 pinout](images/pinout/LUATOS_ESP32_C3_pinout.png)
+
+</details>
+
+<details>
+
+<summary>Real view of boards (LUATOS ESP32-C3 + Air101-LCD)</summary>
+
+### Here is how the baord looks like (I used it for testing)
+
+> It's a bit thick but quite nice kit. You can buy them both on Aliexpress, solder them together and use right away. I use this boards by myself.
+
+![Board front view](images/PPS_assambled_front.jpg)
+
+![Board back view](images/PPS_assambled_back.jpg)
+
+![Both](images/boards/Two_boards.jpg)
+
+![LUATOS ESP32-C3](images/boards/LUATOS_ESP32_C3_view.jpg)
+
+</details>
+
+
+<details>
+
+<summary>Board UI</summary>
+
+### Here is a few pics of UI
+
+> Logo can be changed to anything. It is located in `Logo.h` file.
+
+![Logo](images/PPS_Logo.jpg)
+
+![Main screen](images/PPS_Main.jpg)
+
+![Menu](images/PPS_Menu.jpg)
+
+![PIN entry](images/PPS_PIN.jpg)
+
+![About screen](images/PPS_About.jpg)
+
+</details>
 
 ## Project history and alternatives
 
@@ -417,6 +473,6 @@ Commercial restrictions:
 
 Selling the software, its modified versions, or services whose value derives substantially from the software's functionality is prohibited without prior permission from the copyright holder.
 
-For the complete license terms, see "LICENSE.txt".
+For the complete license terms, see [LICENSE](LICENSE.txt).
 
 Copyright (c) 2026 tizhproger. All rights reserved under the applicable license terms.
