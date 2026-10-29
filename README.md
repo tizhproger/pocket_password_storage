@@ -1,6 +1,6 @@
 # Pocket Password Storage (PPS)
 
-**Current firmware: `2.1.3`** · ESP32-C3 · local password vault · on-device PIN + HTTPS Web UI
+**Current firmware: `2.1.4`** · ESP32-C3 · local password vault · on-device PIN + HTTPS Web UI
 
 Pocket Password Storage is a small, locally operated password manager built around an ESP32 and a TFT display. Passwords are held in encrypted flash storage, accessed using the device's physical controls or over its local HTTPS interface. It does not require a cloud account or an Internet connection; Wi-Fi is used for local access.
 
@@ -29,8 +29,6 @@ Pocket Password Storage is a small, locally operated password manager built arou
 
 ## Project history and alternatives
 
-The version advanced to **2.1.3** because the cumulative changes were extensive: storage and recovery rework, tighter validation and memory handling, updated Arduino/cryptography/JSON integrations, TLS handling, and changes to the Web UI and development tooling. This is **not** just a cosmetic version bump or a minor patch. The version in the supplied source is `Config::VERSION = "2.1.3"` in `PPS/config.h`.
-
 | Version | Historical context |
 | --- | --- |
 | `1.0.0` | Initial encryption and basic device UI. |
@@ -42,13 +40,14 @@ The version advanced to **2.1.3** because the cumulative changes were extensive:
 | **`2.1.0`** | Security-focused rewrite of the earlier codebase: authorized API, per-device HTTPS identity, encrypted journaled storage, strict validation, local controls, and embedded Web UI. |
 | **`2.1.1-recovery`** | Added a PIN-authorized way to migrate legacy data when the old master password is unavailable, plus offline flash-backup inspection and recovery tests. |
 | **`2.1.2-TLS`** | Device-specific TLS trust patch described in the TLS instructions. |
-| **`2.1.3` (current)** | Extensive rework with updated toolchain/dependencies, TLS integration, Web UI workflow and larger vault limits. **The special 2.1.1 legacy-PIN recovery flow is not in this source tree.** |
+| **`2.1.3`** | Extensive rework with updated toolchain/dependencies, TLS integration, Web UI workflow and larger vault limits. **The special 2.1.1 legacy-PIN recovery flow is not in this source tree.** |
+| **`2.1.4` (current)** | Improved WebUI usability. Added possibility to write cryptographic keys and seed phrases. Added filtration by tags and search. Now view entered password is possible. |
 
 ### Alternative branch: `SoloVault` (initial version `0.1.0`)
 
 **SoloVault is a separate, from-scratch firmware architecture**, not another PPS 2.x update. Its initial `0.1.0` design carries over only the previously confirmed display/button pinout and ST7735 configuration; the PPS application sources, web client, authentication mechanisms, storage, backups and migration procedures are **not reused**.
 
-| Topic | PPS 2.1.3 | SoloVault 0.1.0 |
+| Topic | PPS 2.1.4 | SoloVault 0.1.0 |
 | --- | --- | --- |
 | Access | Local HTTPS Web UI and physical buttons | Physical buttons/display plus board-approved USB serial; **no Wi-Fi/BLE/HTTP/OTA** |
 | Unlock model | Master password and 6–8-digit physical PIN | Random **20-character / 100-bit owner code** generated and entered on the device |
@@ -58,9 +57,9 @@ The version advanced to **2.1.3** because the cumulative changes were extensive:
 | SDK in supplied documentation | Arduino-ESP32 **3.x** for PPS 2.1.3 | Arduino-ESP32 **2.0.17** pinned prototype environment |
 | Recovery/migration | Legacy PPS migration and protected snapshot recovery | Explicit read-only interrupted-write recovery; **no PPS migration or cross-format import** |
 
-SoloVault additionally refuses to load/create secrets with a `data,coredump` partition or unsafe UART core-dump configuration, because crash dumps can retain sensitive RAM. Its USB interface has **no stored-password read command**, though passwords typed on a PC for new entries travel over USB **in plaintext**, so the PC must be trusted. The project documents software tests but **no testing on the intended physical board**; it is experimental and unaudited. The SoloVault branch should carry its own full README, architecture, USB format and hardware-test plan.
+SoloVault additionally refuses to load/create secrets with a `data,coredump` partition or unsafe UART core-dump configuration, because crash dumps can retain sensitive RAM. Its USB interface has **no stored-password read command**, though passwords typed on a PC for new entries travel over USB **in plaintext**, so the PC must be trusted. The project is experimental and unaudited. The SoloVault branch has its own full README, architecture, USB format etc.
 
-**Do not flash SoloVault as an in-place PPS firmware upgrade.** Its format, backup files and keys are incompatible with PPS, and changes to partitions may destroy access to old data. Save and verify PPS backups before testing. SoloVault `0.1.0` source code was subsequently supplied and cross-checked against the SoloVault README. Its offline design, USB operation IDs and key storage parameters agree with the documentation; targeted Python and isolated C++ protocol/button tests passed. **No other SoloVault version has been supplied**, so a version-by-version SoloVault changelog cannot be verified. Full Arduino and physical-board testing remain outstanding.
+**Do not flash SoloVault as an in-place PPS firmware upgrade.** Its format, backup files and keys are incompatible with PPS, and changes to partitions may destroy access to old data. Save and verify PPS backups before testing.
 
 ## Repository layout
 
@@ -107,9 +106,6 @@ README.md                 This guide
 | Display libraries | **Adafruit GFX** and **Adafruit ST7735** (plus Arduino SPI/TFT dependencies). |
 | Certificate tooling | **Python 3.11+** and `TLS_Trust_Kit/requirements.txt` (`cryptography==50.0.2` in the supplied archive). |
 | Flash layout | Supplied custom CSV for **4 MiB** flash; use it only with a compatible board/data layout. |
-
-> [!IMPORTANT]
-> Previous guides describing **Arduino-ESP32 2.0.17, Mbed TLS 2.28.x or ArduinoJson 6.21.5** are for older code. They contradict the version checks in **this archive**. Do not use them for PPS 2.1.3. The current C++17 error message mentions `build_opt.h`, but **no `build_opt.h` is included**; ensure your selected toolchain actually compiles as C++17 rather than assuming this file exists.
 
 ### Test-board pinout
 
@@ -191,8 +187,6 @@ TLS_Trust_Kit/pps_tls.py -> issued-XX/pps_tls_certificate.h
 - The first command regenerates `PPS/web_assets.h`; the second exits unsuccessfully if it is out of sync with `web/`. The script resolves paths relative to itself, so it can also be run from another working directory.
 - Commit/review changes to both the human-readable source files and generated header, then compile the Arduino sketch. The generated `WEB_INDEX`, `WEB_SCRIPT`, and `WEB_STYLE` arrays are served directly by `PPS/web.cpp`. **No SPIFFS web upload is required or safe for an in-place upgrade.**
 - A browser may request `/device.crt` to inspect the **public** device certificate. It is unrelated to the frontend embedding step.
-
-The `embed_web.py` supplied in the **original uploaded archive** incorrectly targeted `PPS_V2/web_assets.h` and omitted the dynamic `PPS_LIMITS` prelude. **The accompanying corrected archive fixes both issues**. If using the untouched original ZIP, update the generator **before** running it; otherwise it will not safely update the compiled Web UI.
 
 ### Code ownership and API boundaries
 
@@ -410,21 +404,19 @@ PPS 2.1.3 can read protected **v2** vault storage. The **first successful write*
 
 The previous snapshot may survive only until the **next write attempt**, including changing a password or importing; **even a failed write can damage the backup slot** while leaving the active slot intact. Make an **external backup before importing**. If post-write metadata verification is ambiguous, the vault blocks writes: restart and inspect its state before taking further action.
 
-
 License
 
 Pocket Password Storage (PPS) is licensed under the MIT License with Commons Clause v1.0.
 
 You are free to:
 
-- View and study the source code.
-- Use and modify the software.
-- Fork and redistribute the software under the same licensing terms.
-
+View and study the source code.
+Use and modify the software.
+Fork and redistribute the software under the same licensing terms.
 Commercial restrictions:
 
 Selling the software, its modified versions, or services whose value derives substantially from the software's functionality is prohibited without prior permission from the copyright holder.
 
-For the complete license terms, see "LICENSE.txt" (./LICENSE.txt).
+For the complete license terms, see "LICENSE.txt".
 
 Copyright (c) 2026 tizhproger. All rights reserved under the applicable license terms.
