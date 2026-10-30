@@ -72,6 +72,7 @@ if(typeof document!=='undefined'){
   const $=id=>document.getElementById(id);
   let token='',records={schema:2,entries:[]},revision='',status={},editId='',editRevision='',networkRevision='',pendingImport=null,encryptedImport=null,importRevision='',restoreRevision='',busy=false,lastActivity=0,lastTouch=0;
   const revealTimers=new Set(),extraReaders=new WeakMap();
+  let searchTimer=null;
   let originalTags=null,originalEntry=null,originalInputs={},phraseTarget=null,phraseSize=24;
   function notice(message){$('notice').textContent=message;const dialog=[...document.querySelectorAll('dialog[open]')].at(-1);if(dialog){let p=dialog.querySelector('.dialogNotice');if(!p){p=document.createElement('p');p.className='dialogNotice';p.setAttribute('role','status');dialog.prepend(p);}p.textContent=message;}}
   function authProgress(message,label){
@@ -120,6 +121,7 @@ if(typeof document!=='undefined'){
     $('showPhrase').checked=false;togglePhrase();
   }
   function clearClient(){
+    if(searchTimer!==null){clearTimeout(searchTimer);searchTimer=null;}
     mask();hideEditorSecrets();token='';records={schema:2,entries:[]};revision='';editId='';pendingImport=null;encryptedImport=null;originalTags=null;originalEntry=null;originalInputs={};phraseTarget=null;
     $('records').replaceChildren();
     document.querySelectorAll('dialog').forEach(d=>d.close());document.querySelectorAll('form').forEach(f=>f.reset());
@@ -145,6 +147,7 @@ if(typeof document!=='undefined'){
     secrets.push({text,value});return line;
   }
   function render(){
+    if(searchTimer!==null){clearTimeout(searchTimer);searchTimer=null;}
     mask();syncTagFilter();$('records').replaceChildren();
     const visible=records.entries.filter(e=>PPS.matches(e,$('search').value,$('searchMatch').value==='exact',$('tagFilter').value));
     $('count').textContent=visible.length+' shown · '+records.entries.length+' / '+PPS.limits.maxEntries+' records · '+(PPS.byteLength(JSON.stringify(records))/1024).toFixed(1)+' / '+(PPS.limits.vaultBytes/1024)+' KiB';
@@ -251,7 +254,12 @@ if(typeof document!=='undefined'){
     if(d.id==='phraseDialog'){$('phraseWords').replaceChildren();phraseTarget=null;}
     if(d.id==='importDialog')pendingImport=null;if(d.id==='decryptDialog')encryptedImport=null;
   }));
-  $('search').addEventListener('input',render);$('searchMatch').addEventListener('change',render);$('tagFilter').addEventListener('change',render);
+  $('search').addEventListener('input',()=>{
+    mask();
+    if(searchTimer!==null)clearTimeout(searchTimer);
+    searchTimer=setTimeout(()=>{searchTimer=null;render();},180);
+  });
+  $('searchMatch').addEventListener('change',render);$('tagFilter').addEventListener('change',render);
   $('clearFilters').onclick=()=>{$('search').value='';$('searchMatch').value='partial';$('tagFilter').value='';render();$('search').focus();};
   $('tags').addEventListener('input',updateFieldCount);
   $('showPassword').onclick=()=>showPassword($('password').type==='password');
@@ -326,7 +334,7 @@ if(typeof document!=='undefined'){
   $('restore').onclick=()=>run(()=>{restoreRevision=revision;$('restoreForm').reset();$('restoreDialog').showModal();});
   $('restoreForm').onsubmit=e=>{e.preventDefault();run(async()=>{const password=$('restorePassword').value;$('restorePassword').value='';await api('restore',{revision:restoreRevision,password,confirm_replace:true});clearClient();notice('Previous records restored. Your master password and PIN were preserved; log in again.');});};
   $('settings').onclick=()=>run(async()=>{const s=(await api('settings')).body;networkRevision=s.revision;$('networkForm').reset();$('ssid').value=s.ssid;$('apSsid').value=s.ap_ssid;$('wifiMode').value=s.wifi_mode;$('openWifi').checked=!s.has_password;$('networkWarning').textContent=s.warning||'';$('settingsDialog').showModal();});
-  $('diagnostics').onclick=()=>run(async()=>{const d=(await api('diagnostics')).body;const kib=n=>Number.isFinite(n)?(n/1024).toFixed(1)+' KiB':'unavailable';$('diagnosticsResult').textContent=['Firmware: '+d.firmware,'Free RAM: '+kib(d.heap_free),'Minimum RAM since startup: '+kib(d.heap_min),'Largest free block: '+kib(d.heap_largest_block),'Allocation failures: '+d.allocation_failures,'Limit: '+d.max_entries+' records, '+kib(d.vault_max_bytes),'Arduino-ESP32: '+(d.arduino_core||'—')+'; ESP-IDF: '+(d.esp_idf||'—'),'ArduinoJson: '+d.arduinojson+'; Mbed TLS: '+d.mbedtls,d.tls_sdk_review_required?'TLS SDK security updates need to be reviewed; see the firmware release notes.':''].filter(Boolean).join('\n');});
+  $('diagnostics').onclick=()=>run(async()=>{const d=(await api('diagnostics')).body;const kib=n=>Number.isFinite(n)?(n/1024).toFixed(1)+' KiB':'unavailable';$('diagnosticsResult').textContent=['Firmware: '+d.firmware,'Free RAM: '+kib(d.heap_free),'Minimum RAM since startup: '+kib(d.heap_min),'Largest free block: '+kib(d.heap_largest_block),'Allocation failures: '+d.allocation_failures,'Limit: '+d.max_entries+' records, '+kib(d.vault_max_bytes),'Vault read: '+(d.vault_read_last_ms??'—')+' ms last, '+(d.vault_read_peak_ms??'—')+' ms max','Arduino-ESP32: '+(d.arduino_core||'—')+'; ESP-IDF: '+(d.esp_idf||'—'),'ArduinoJson: '+d.arduinojson+'; Mbed TLS: '+d.mbedtls,d.tls_sdk_review_required?'TLS SDK security updates need to be reviewed; see the firmware release notes.':''].filter(Boolean).join('\n');});
   $('networkForm').onsubmit=e=>{e.preventDefault();run(async()=>{await api('settings',{revision:networkRevision,ssid:$('ssid').value,password:$('wifiPassword').value,ap_ssid:$('apSsid').value,ap_password:$('apPassword').value,wifi_mode:$('wifiMode').value,open_wifi:$('openWifi').checked});networkRevision=(await api('settings')).body.revision;$('wifiPassword').value='';$('apPassword').value='';notice('Settings saved. Click “Apply” to reconnect.');});};
   $('wifiPassword').addEventListener('input',()=>{if($('wifiPassword').value)$('openWifi').checked=false;});
   $('openWifi').addEventListener('change',()=>{if($('openWifi').checked)$('wifiPassword').value='';});
