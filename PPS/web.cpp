@@ -150,6 +150,8 @@ static esp_err_t dispatch(httpd_req_t* r){
     SecureJson out(4096);out["firmware"]=Config::VERSION;out["arduinojson"]=ARDUINOJSON_VERSION;out["mbedtls"]=MBEDTLS_VERSION_STRING;
     out["tls_sdk_review_required"]=MBEDTLS_VERSION_NUMBER<0x03060700;out["max_entries"]=Config::MAX_ENTRIES;out["vault_max_bytes"]=Config::VAULT_MAX;out["json_budget_bytes"]=Config::JSON_CAPACITY;
     out["allocation_failures"]=PpsMemory::failures.load(std::memory_order_relaxed);
+    out["vault_read_last_ms"]=Vault::readLastMillis();
+    out["vault_read_peak_ms"]=Vault::readPeakMillis();
 #ifdef ARDUINO_ARCH_ESP32
     out["arduino_core"]=ESP_ARDUINO_VERSION_STR;out["esp_idf"]=esp_get_idf_version();out["heap_free"]=heap_caps_get_free_size(MALLOC_CAP_8BIT);out["heap_min"]=heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);out["heap_largest_block"]=heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
 #endif
@@ -203,9 +205,23 @@ static esp_err_t dispatch(httpd_req_t* r){
   return result(r,404,"Not found");
 }
 static esp_err_t enqueue(httpd_req_t* r){
-  Job job{r,xSemaphoreCreateBinary(),ESP_FAIL};if(!job.done)return ESP_FAIL;
-  portENTER_CRITICAL(&mux);bool queued=accepting&&!pending;if(queued)pending=&job;portEXIT_CRITICAL(&mux);
-  if(queued)xSemaphoreTake(job.done,portMAX_DELAY);vSemaphoreDelete(job.done);return job.result;
+  Job job{r,xSemaphoreCreateBinary(),ESP_FAIL};
+  if(!job.done){
+    if(!securityHeaders(r))return ESP_FAIL;
+    return noMemory(r);
+  }
+  portENTER_CRITICAL(&mux);
+  bool queued=accepting&&!pending;
+  if(queued)pending=&job;
+  portEXIT_CRITICAL(&mux);
+  if(!queued){
+    vSemaphoreDelete(job.done);
+    if(!securityHeaders(r))return ESP_FAIL;
+    return result(r,503,"Device busy; retry the request","device_busy");
+  }
+  xSemaphoreTake(job.done,portMAX_DELAY);
+  vSemaphoreDelete(job.done);
+  return job.result;
 }
 bool start(){
   if(server)return true;if(certificate.empty()||privateKey.empty())return false;

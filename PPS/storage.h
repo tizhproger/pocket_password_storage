@@ -9,6 +9,8 @@ enum class State {Empty,Legacy,Locked,Unlocked,Corrupt,FsError};
 bool begin();
 State state();
 Outcome lastResult();
+uint32_t readLastMillis();
+uint32_t readPeakMillis();
 const char* stateName();
 void lock();
 bool unlock(const String&,bool byPin=false);

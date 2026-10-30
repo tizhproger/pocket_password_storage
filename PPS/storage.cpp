@@ -18,7 +18,14 @@ struct Header {
 static_assert(sizeof(Header)==216,"On-disk format");
 static State status=State::FsError;
 static Outcome last=Outcome::Ok;
+static uint32_t lastReadMs=0,peakReadMs=0;
 Outcome lastResult(){return last;}
+uint32_t readLastMillis(){return lastReadMs;}
+uint32_t readPeakMillis(){return peakReadMs;}
+struct ReadTiming {
+  uint32_t started=millis();
+  ~ReadTiming(){uint32_t ms=millis()-started;lastReadMs=ms;if(ms>peakReadMs)peakReadMs=ms;}
+};
 static bool failure(Outcome r){last=r;return false;}
 static Preferences meta;
 static Journal::Head head{};
@@ -40,10 +47,21 @@ bool validate(JsonVariantConst v){
   if(!v.is<JsonObjectConst>())return false;auto root=v.as<JsonObjectConst>();
   if(root.size()!=2||!root["schema"].is<int>()||root["schema"].as<int>()!=2||!root["entries"].is<JsonArrayConst>())return false;
   auto entries=root["entries"].as<JsonArrayConst>();if(entries.size()>Config::MAX_ENTRIES)return false;
+  uint16_t idSlots[Config::MAX_ENTRIES*2]{};
+  constexpr size_t idSlotCount=Config::MAX_ENTRIES*2;
   for(size_t i=0;i<entries.size();i++){
     auto e=entries[i].as<JsonObjectConst>();Secret<16> id;
     if(e.isNull()||e.size()!=5||!str(e["id"],32,32)||!Crypto::unhex(e["id"].as<const char*>(),id.data,16)||!str(e["site"],1,128)||!str(e["login"],0,256)||!str(e["password"],0,256)||!e["extras"].is<JsonArrayConst>())return false;
-    for(size_t j=0;j<i;j++)if(!strcmp(e["id"],entries[j]["id"]))return false;
+    const char* idText=e["id"].as<const char*>();
+    uint32_t hash=2166136261u;
+    for(size_t n=0;n<32;n++)hash=(hash^static_cast<uint8_t>(idText[n]))*16777619u;
+    size_t slot=hash%idSlotCount;
+    while(idSlots[slot]){
+      const char* other=entries[idSlots[slot]-1]["id"].as<const char*>();
+      if(!strcmp(idText,other))return false;
+      slot=(slot+1)%idSlotCount;
+    }
+    idSlots[slot]=static_cast<uint16_t>(i+1);
     auto extras=e["extras"].as<JsonArrayConst>();if(extras.size()>Config::MAX_EXTRAS)return false;
     for(size_t j=0;j<extras.size();j++){
       auto x=extras[j].as<JsonObjectConst>();if(x.isNull()||x.size()!=2||!str(x["name"],1,64)||!str(x["value"],0,512))return false;
@@ -165,6 +183,7 @@ bool unlock(const String& password,bool byPin){
   memcpy(dataKey.data,key.data,32);header=h;status=State::Unlocked;return true;
 }
 bool read(SecureJson& doc){
+  ReadTiming timing;
   PpsMemory::Attempt memory;last=Outcome::Ok;doc.clear();
   if(status!=State::Unlocked)return failure(Outcome::Unavailable);
   Bytes b;Header h;

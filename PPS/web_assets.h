@@ -48,29 +48,7 @@ R"PPSWEB(<!doctype html>
 <dialog id="settingsDialog"><h2>Settings</h2><button type="button" id="diagnostics" class="secondary">Memory and libraries</button><pre id="diagnosticsResult" role="status"></pre><p id="networkWarning" class="hint"></p><form id="networkForm"><label>Mode<select id="wifiMode"><option value="ap">Access point</option><option value="wifi">Home network</option></select></label><label>Home network SSID<input id="ssid" maxlength="32" autocomplete="off"></label><label>New home network password<input id="wifiPassword" type="password" maxlength="63" autocomplete="new-password" placeholder="Leave blank to keep the current password"></label><label class="check"><input id="openWifi" type="checkbox">Home network without a password</label><label>Access point SSID<input id="apSsid" required maxlength="32" autocomplete="off"></label><label>New access point password<input id="apPassword" type="password" maxlength="63" autocomplete="new-password" placeholder="Leave blank to keep the current password"></label><div class="actions"><button>Save network settings</button><button type="button" id="applyNetwork" class="secondary">Apply and reconnect</button></div></form><hr>
 <form id="masterForm"><h3>Change master password</h3><label>Current password<input id="oldMaster" type="password" required maxlength="128" autocomplete="current-password"></label><label>New password (at least 12 bytes)<input id="newMaster" type="password" required maxlength="128" autocomplete="new-password"></label><label>Repeat new password<input id="newMasterConfirm" type="password" required maxlength="128" autocomplete="new-password"></label><button>Change and lock</button></form><p class="hint">The PIN is changed using the device buttons after entering the current PIN.</p><button data-close="settingsDialog" class="secondary">Close</button></dialog>
 <button type="button" id="backToTop" class="backToTop" aria-label="Back to top" hidden>↑ Back to top</button>
-<footer>Original project: <a href='https://github.com/tizhproger/pocket_password_storage'>tizhproger</a> · Version 2.1.4</footer></body></html>
-)PPSWEB";
-static const char WEB_STYLE[] PROGMEM =
-R"PPSWEB(:root{color-scheme:dark;--bg:#10181b;--card:#1b292d;--line:#3a5056;--text:#f1f6f5;--muted:#b5c9c9;--accent:#8fe0bd;font-family:system-ui,sans-serif}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);line-height:1.5}header,main,body>footer{max-width:1000px;margin:auto;padding:24px}header{display:flex;justify-content:space-between;gap:24px;align-items:center;border-bottom:1px solid var(--line)}h1{font-size:1.5rem;margin:6px 0}small{letter-spacing:.15em;color:var(--accent)}h2{font-size:1.3rem}#connection,.hint,body>footer{color:var(--muted);font-size:.9rem}section{padding:24px;background:var(--card);border:1px solid var(--line);border-radius:16px}#auth{max-width:620px;margin:auto}label{display:block;margin:14px 0}input,select,button,.fileButton{font:inherit}input,select{display:block;width:100%;padding:12px;color:var(--text);background:#101b1f;border:1px solid var(--line);border-radius:8px;margin-top:6px}input:focus,button:focus-visible,select:focus{outline:2px solid var(--accent);outline-offset:2px}button,.fileButton{border:1px solid transparent;border-radius:8px;padding:10px 14px;background:var(--accent);color:#10261d;cursor:pointer;white-space:normal}button:disabled{opacity:.5;cursor:wait}.secondary,.fileButton{color:var(--text);background:transparent;border-color:var(--line)}.danger{background:#663333;color:#fff;border-color:#bb7777}nav,.actions{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}.fileButton{margin:0;position:relative;overflow:hidden}.fileButton input{position:absolute;inset:0;opacity:0;cursor:pointer;margin:0}a{color:var(--accent)}.listHeader{display:flex;align-items:center;justify-content:space-between}article{border-top:1px solid var(--line);padding:18px 0}article h3{margin:0 0 12px;overflow-wrap:anywhere}article p{margin:6px 0;overflow-wrap:anywhere}.secret{font-family:ui-monospace,monospace;white-space:pre-wrap}.extra{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:center;margin:12px 0}.extra input{min-width:0}.extra button{padding:8px}dialog{color:var(--text);background:var(--card);border:1px solid var(--line);border-radius:16px;width:min(600px,calc(100% - 24px));max-height:calc(100dvh - 32px);padding:24px;overflow:auto}dialog::backdrop{background:#000a}dialog h2{margin-top:0}hr{border:0;border-top:1px solid var(--line);margin:26px 0}.check{display:flex;align-items:center;gap:12px}.check input{width:auto;margin:0}#notice,.dialogNotice{white-space:pre-wrap;overflow-wrap:anywhere;color:#ffdca0}#notice:empty{display:none}[hidden]{display:none!important}body>footer{text-align:center}@media(max-width:600px){header{display:block}main,header{padding:16px}section{padding:16px}nav button,nav .fileButton{flex:1 1 40%}.extra{grid-template-columns:1fr}.extra button{justify-self:end}.actions button{flex:1 1 45%}}
-
-#diagnosticsResult {white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:.85rem;}
-.progressNotice{display:flex;align-items:center;gap:12px;margin-top:16px;padding:12px;border:1px solid var(--line);border-radius:8px;color:var(--accent);overflow-wrap:anywhere}
-.spinner{display:inline-block;flex:0 0 auto;width:20px;height:20px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:ppsSpin .8s linear infinite}
-@keyframes ppsSpin{to{transform:rotate(360deg)}}
-@media(prefers-reduced-motion:reduce){.spinner{animation:none}}
-textarea{display:block;width:100%;padding:12px;color:var(--text);background:#101b1f;border:1px solid var(--line);border-radius:8px;margin-top:6px;font:inherit;resize:vertical;min-height:100px}
-textarea:focus{outline:2px solid var(--accent);outline-offset:2px}
-.filters{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr);gap:12px;margin-bottom:24px;align-items:end}
-.filters label{margin:0;min-width:0}.filters button{justify-self:start}.filters .searchLabel{grid-column:1/-1}
-.listHeader{flex-wrap:wrap;gap:8px;margin-bottom:16px}.listHeader h2{margin-bottom:0}#count{color:var(--muted);font-size:.85rem}
-.tags{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}.tag{border:1px solid var(--line);border-radius:999px;padding:2px 10px;color:var(--accent);font-size:.85rem;overflow-wrap:anywhere;max-width:100%}
-.fieldLabel{color:var(--muted)}.recordField .secret{overflow-wrap:anywhere}
-.extra{display:block;border:1px solid var(--line);border-radius:12px;padding:12px;margin:16px 0}.extra label{margin:0 0 10px}.extra .actions{margin-bottom:0}.extra textarea{font-family:ui-monospace,monospace;font-size:.95rem}
-.extra .hint{margin:8px 0}.limitExceeded{color:#ffdca0}.fieldTools{display:flex;align-items:end;flex-wrap:wrap;gap:10px}.fieldTools label{flex:1;margin:0;min-width:180px}.fieldTools button{margin-bottom:1px}
-.wordGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.wordGrid label{display:flex;align-items:center;gap:6px;margin:0;min-width:0;color:var(--muted);font-size:.85rem}.wordGrid input{min-width:0;margin:0;padding:10px 6px;font-size:1rem}
-.backToTop{position:fixed;right:20px;bottom:calc(20px + env(safe-area-inset-bottom,0px));z-index:2;box-shadow:0 4px 20px #0008}body>footer{padding-bottom:100px}
-@media(max-width:600px){.filters{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.filters button{grid-column:1/-1}.wordGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.backToTop{right:12px;font-size:.9rem}dialog{padding:18px}.extra .actions button{flex:1 1 100%}}
-)PPSWEB";
+<footer>Original project: <a href='https://github.com/tizhproger/pocket_password_storage'>tizhproger</a> · Version 2.1.4</footer></body></html>)PPSWEB";
 static const char WEB_SCRIPT[] PROGMEM =
 "'use strict';\n"
 "const PPS_LIMITS=Object.freeze({maxEntries:" PPS_STRINGIFY(PPS_MAX_ENTRIES)
@@ -148,6 +126,7 @@ if(typeof document!=='undefined'){
   const $=id=>document.getElementById(id);
   let token='',records={schema:2,entries:[]},revision='',status={},editId='',editRevision='',networkRevision='',pendingImport=null,encryptedImport=null,importRevision='',restoreRevision='',busy=false,lastActivity=0,lastTouch=0;
   const revealTimers=new Set(),extraReaders=new WeakMap();
+  let searchTimer=null;
   let originalTags=null,originalEntry=null,originalInputs={},phraseTarget=null,phraseSize=24;
   function notice(message){$('notice').textContent=message;const dialog=[...document.querySelectorAll('dialog[open]')].at(-1);if(dialog){let p=dialog.querySelector('.dialogNotice');if(!p){p=document.createElement('p');p.className='dialogNotice';p.setAttribute('role','status');dialog.prepend(p);}p.textContent=message;}}
   function authProgress(message,label){
@@ -196,6 +175,7 @@ if(typeof document!=='undefined'){
     $('showPhrase').checked=false;togglePhrase();
   }
   function clearClient(){
+    if(searchTimer!==null){clearTimeout(searchTimer);searchTimer=null;}
     mask();hideEditorSecrets();token='';records={schema:2,entries:[]};revision='';editId='';pendingImport=null;encryptedImport=null;originalTags=null;originalEntry=null;originalInputs={};phraseTarget=null;
     $('records').replaceChildren();
     document.querySelectorAll('dialog').forEach(d=>d.close());document.querySelectorAll('form').forEach(f=>f.reset());
@@ -221,6 +201,7 @@ if(typeof document!=='undefined'){
     secrets.push({text,value});return line;
   }
   function render(){
+    if(searchTimer!==null){clearTimeout(searchTimer);searchTimer=null;}
     mask();syncTagFilter();$('records').replaceChildren();
     const visible=records.entries.filter(e=>PPS.matches(e,$('search').value,$('searchMatch').value==='exact',$('tagFilter').value));
     $('count').textContent=visible.length+' shown · '+records.entries.length+' / '+PPS.limits.maxEntries+' records · '+(PPS.byteLength(JSON.stringify(records))/1024).toFixed(1)+' / '+(PPS.limits.vaultBytes/1024)+' KiB';
@@ -327,7 +308,12 @@ if(typeof document!=='undefined'){
     if(d.id==='phraseDialog'){$('phraseWords').replaceChildren();phraseTarget=null;}
     if(d.id==='importDialog')pendingImport=null;if(d.id==='decryptDialog')encryptedImport=null;
   }));
-  $('search').addEventListener('input',render);$('searchMatch').addEventListener('change',render);$('tagFilter').addEventListener('change',render);
+  $('search').addEventListener('input',()=>{
+    mask();
+    if(searchTimer!==null)clearTimeout(searchTimer);
+    searchTimer=setTimeout(()=>{searchTimer=null;render();},180);
+  });
+  $('searchMatch').addEventListener('change',render);$('tagFilter').addEventListener('change',render);
   $('clearFilters').onclick=()=>{$('search').value='';$('searchMatch').value='partial';$('tagFilter').value='';render();$('search').focus();};
   $('tags').addEventListener('input',updateFieldCount);
   $('showPassword').onclick=()=>showPassword($('password').type==='password');
@@ -402,7 +388,7 @@ if(typeof document!=='undefined'){
   $('restore').onclick=()=>run(()=>{restoreRevision=revision;$('restoreForm').reset();$('restoreDialog').showModal();});
   $('restoreForm').onsubmit=e=>{e.preventDefault();run(async()=>{const password=$('restorePassword').value;$('restorePassword').value='';await api('restore',{revision:restoreRevision,password,confirm_replace:true});clearClient();notice('Previous records restored. Your master password and PIN were preserved; log in again.');});};
   $('settings').onclick=()=>run(async()=>{const s=(await api('settings')).body;networkRevision=s.revision;$('networkForm').reset();$('ssid').value=s.ssid;$('apSsid').value=s.ap_ssid;$('wifiMode').value=s.wifi_mode;$('openWifi').checked=!s.has_password;$('networkWarning').textContent=s.warning||'';$('settingsDialog').showModal();});
-  $('diagnostics').onclick=()=>run(async()=>{const d=(await api('diagnostics')).body;const kib=n=>Number.isFinite(n)?(n/1024).toFixed(1)+' KiB':'unavailable';$('diagnosticsResult').textContent=['Firmware: '+d.firmware,'Free RAM: '+kib(d.heap_free),'Minimum RAM since startup: '+kib(d.heap_min),'Largest free block: '+kib(d.heap_largest_block),'Allocation failures: '+d.allocation_failures,'Limit: '+d.max_entries+' records, '+kib(d.vault_max_bytes),'Arduino-ESP32: '+(d.arduino_core||'—')+'; ESP-IDF: '+(d.esp_idf||'—'),'ArduinoJson: '+d.arduinojson+'; Mbed TLS: '+d.mbedtls,d.tls_sdk_review_required?'TLS SDK security updates need to be reviewed; see the firmware release notes.':''].filter(Boolean).join('\n');});
+  $('diagnostics').onclick=()=>run(async()=>{const d=(await api('diagnostics')).body;const kib=n=>Number.isFinite(n)?(n/1024).toFixed(1)+' KiB':'unavailable';$('diagnosticsResult').textContent=['Firmware: '+d.firmware,'Free RAM: '+kib(d.heap_free),'Minimum RAM since startup: '+kib(d.heap_min),'Largest free block: '+kib(d.heap_largest_block),'Allocation failures: '+d.allocation_failures,'Limit: '+d.max_entries+' records, '+kib(d.vault_max_bytes),'Vault read: '+(d.vault_read_last_ms??'—')+' ms last, '+(d.vault_read_peak_ms??'—')+' ms max','Arduino-ESP32: '+(d.arduino_core||'—')+'; ESP-IDF: '+(d.esp_idf||'—'),'ArduinoJson: '+d.arduinojson+'; Mbed TLS: '+d.mbedtls,d.tls_sdk_review_required?'TLS SDK security updates need to be reviewed; see the firmware release notes.':''].filter(Boolean).join('\n');});
   $('networkForm').onsubmit=e=>{e.preventDefault();run(async()=>{await api('settings',{revision:networkRevision,ssid:$('ssid').value,password:$('wifiPassword').value,ap_ssid:$('apSsid').value,ap_password:$('apPassword').value,wifi_mode:$('wifiMode').value,open_wifi:$('openWifi').checked});networkRevision=(await api('settings')).body.revision;$('wifiPassword').value='';$('apPassword').value='';notice('Settings saved. Click “Apply” to reconnect.');});};
   $('wifiPassword').addEventListener('input',()=>{if($('wifiPassword').value)$('openWifi').checked=false;});
   $('openWifi').addEventListener('change',()=>{if($('openWifi').checked)$('wifiPassword').value='';});
@@ -415,5 +401,24 @@ if(typeof document!=='undefined'){
   window.addEventListener('pagehide',clearClient);
   setInterval(()=>{if(token&&Date.now()-lastActivity>=120000){const old=token;clearClient();fetch('/api/logout',{method:'POST',headers:{Authorization:'Bearer '+old,'Content-Type':'application/json'},body:'{}',credentials:'omit',keepalive:true}).catch(()=>{});notice('Session ended due to inactivity');}},10000);
   run(check);
-}
-)PPSWEB";
+})PPSWEB";
+static const char WEB_STYLE[] PROGMEM =
+R"PPSWEB(:root{color-scheme:dark;--bg:#10181b;--card:#1b292d;--line:#3a5056;--text:#f1f6f5;--muted:#b5c9c9;--accent:#8fe0bd;font-family:system-ui,sans-serif}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);line-height:1.5}header,main,body>footer{max-width:1000px;margin:auto;padding:24px}header{display:flex;justify-content:space-between;gap:24px;align-items:center;border-bottom:1px solid var(--line)}h1{font-size:1.5rem;margin:6px 0}small{letter-spacing:.15em;color:var(--accent)}h2{font-size:1.3rem}#connection,.hint,body>footer{color:var(--muted);font-size:.9rem}section{padding:24px;background:var(--card);border:1px solid var(--line);border-radius:16px}#auth{max-width:620px;margin:auto}label{display:block;margin:14px 0}input,select,button,.fileButton{font:inherit}input,select{display:block;width:100%;padding:12px;color:var(--text);background:#101b1f;border:1px solid var(--line);border-radius:8px;margin-top:6px}input:focus,button:focus-visible,select:focus{outline:2px solid var(--accent);outline-offset:2px}button,.fileButton{border:1px solid transparent;border-radius:8px;padding:10px 14px;background:var(--accent);color:#10261d;cursor:pointer;white-space:normal}button:disabled{opacity:.5;cursor:wait}.secondary,.fileButton{color:var(--text);background:transparent;border-color:var(--line)}.danger{background:#663333;color:#fff;border-color:#bb7777}nav,.actions{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}.fileButton{margin:0;position:relative;overflow:hidden}.fileButton input{position:absolute;inset:0;opacity:0;cursor:pointer;margin:0}a{color:var(--accent)}.listHeader{display:flex;align-items:center;justify-content:space-between}article{border-top:1px solid var(--line);padding:18px 0}article h3{margin:0 0 12px;overflow-wrap:anywhere}article p{margin:6px 0;overflow-wrap:anywhere}.secret{font-family:ui-monospace,monospace;white-space:pre-wrap}.extra{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:center;margin:12px 0}.extra input{min-width:0}.extra button{padding:8px}dialog{color:var(--text);background:var(--card);border:1px solid var(--line);border-radius:16px;width:min(600px,calc(100% - 24px));max-height:calc(100dvh - 32px);padding:24px;overflow:auto}dialog::backdrop{background:#000a}dialog h2{margin-top:0}hr{border:0;border-top:1px solid var(--line);margin:26px 0}.check{display:flex;align-items:center;gap:12px}.check input{width:auto;margin:0}#notice,.dialogNotice{white-space:pre-wrap;overflow-wrap:anywhere;color:#ffdca0}#notice:empty{display:none}[hidden]{display:none!important}body>footer{text-align:center}@media(max-width:600px){header{display:block}main,header{padding:16px}section{padding:16px}nav button,nav .fileButton{flex:1 1 40%}.extra{grid-template-columns:1fr}.extra button{justify-self:end}.actions button{flex:1 1 45%}}
+
+#diagnosticsResult {white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:.85rem;}
+.progressNotice{display:flex;align-items:center;gap:12px;margin-top:16px;padding:12px;border:1px solid var(--line);border-radius:8px;color:var(--accent);overflow-wrap:anywhere}
+.spinner{display:inline-block;flex:0 0 auto;width:20px;height:20px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:ppsSpin .8s linear infinite}
+@keyframes ppsSpin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.spinner{animation:none}}
+textarea{display:block;width:100%;padding:12px;color:var(--text);background:#101b1f;border:1px solid var(--line);border-radius:8px;margin-top:6px;font:inherit;resize:vertical;min-height:100px}
+textarea:focus{outline:2px solid var(--accent);outline-offset:2px}
+.filters{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr);gap:12px;margin-bottom:24px;align-items:end}
+.filters label{margin:0;min-width:0}.filters button{justify-self:start}.filters .searchLabel{grid-column:1/-1}
+.listHeader{flex-wrap:wrap;gap:8px;margin-bottom:16px}.listHeader h2{margin-bottom:0}#count{color:var(--muted);font-size:.85rem}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}.tag{border:1px solid var(--line);border-radius:999px;padding:2px 10px;color:var(--accent);font-size:.85rem;overflow-wrap:anywhere;max-width:100%}
+.fieldLabel{color:var(--muted)}.recordField .secret{overflow-wrap:anywhere}
+.extra{display:block;border:1px solid var(--line);border-radius:12px;padding:12px;margin:16px 0}.extra label{margin:0 0 10px}.extra .actions{margin-bottom:0}.extra textarea{font-family:ui-monospace,monospace;font-size:.95rem}
+.extra .hint{margin:8px 0}.limitExceeded{color:#ffdca0}.fieldTools{display:flex;align-items:end;flex-wrap:wrap;gap:10px}.fieldTools label{flex:1;margin:0;min-width:180px}.fieldTools button{margin-bottom:1px}
+.wordGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.wordGrid label{display:flex;align-items:center;gap:6px;margin:0;min-width:0;color:var(--muted);font-size:.85rem}.wordGrid input{min-width:0;margin:0;padding:10px 6px;font-size:1rem}
+.backToTop{position:fixed;right:20px;bottom:calc(20px + env(safe-area-inset-bottom,0px));z-index:2;box-shadow:0 4px 20px #0008}body>footer{padding-bottom:100px}
+@media(max-width:600px){.filters{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.filters button{grid-column:1/-1}.wordGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.backToTop{right:12px;font-size:.9rem}dialog{padding:18px}.extra .actions button{flex:1 1 100%}})PPSWEB";
