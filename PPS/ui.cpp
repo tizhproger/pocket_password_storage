@@ -25,7 +25,7 @@ static int menu=0,entryIndex=0,entryCount=0,scroll=0,digit=0;
 static bool entryListReady=false;
 static String entryListRevision;
 static String pinValue,firstPin,selectedId,messageText,lastRevision,lastNet;
-static uint64_t lastFrame=0,batteryAt=0,splashUntil=0;
+static uint64_t lastFrame=0,batteryAt=0,splashUntil=0,revisionAt=0,networkAt=0;
 static float voltage=0;
 static Vault::State lastState=Vault::State::FsError;
 static const char* menuItems[]={"Passwords","Connection","Battery","Sleep","About / TLS","Wi-Fi mode","Change PIN","Lock","Factory reset"};
@@ -42,7 +42,22 @@ static void go(Screen next){
 static void message(const String& s,Screen next=Locked){messageText=s;afterMessage=next;go(Message);}
 static void text(int x,int y,const char* s,uint16_t color=ST77XX_WHITE){
   tft.setCursor(x,y);tft.setTextColor(color);
-  for(const unsigned char* p=reinterpret_cast<const unsigned char*>(s?s:"");*p;p++){char c=DisplayText::glyph(*p);if(c)tft.write(c);}
+  const unsigned char* p=reinterpret_cast<const unsigned char*>(s?s:"");
+  while(*p){
+    uint32_t cp=DisplayText::nextCodepoint(p);
+    if(cp=='\n'){tft.setCursor(x,tft.getCursorY()+11);continue;}
+    cp=DisplayText::normalize(cp);
+    if(cp==0)continue;
+    const uint8_t* bitmap=DisplayText::cyrillicGlyph(cp);
+    if(bitmap){
+      const int16_t gx=tft.getCursorX(),gy=tft.getCursorY();
+      if(gx+DisplayText::CYRILLIC_WIDTH<=tft.width())
+        tft.drawBitmap(gx,gy,bitmap,DisplayText::CYRILLIC_WIDTH,DisplayText::CYRILLIC_HEIGHT,color);
+      tft.setCursor(gx+DisplayText::CYRILLIC_WIDTH,gy);
+    }else{
+      tft.write(cp>=32&&cp<127?char(cp):'?');
+    }
+  }
 }
 static void text(int x,int y,const String& s,uint16_t color=ST77XX_WHITE){text(x,y,s.c_str(),color);}
 static void title(const char* s){tft.fillScreen(ST77XX_BLACK);text(0,0,s,ST77XX_CYAN);tft.drawFastHLine(0,10,160,ST77XX_BLUE);}
@@ -188,8 +203,20 @@ static void draw(){
     }
     case Details:{title("Entry");SecureJson doc(Config::JSON_CAPACITY);if(!Vault::read(doc)){message(localError(Vault::lastResult()));return;}JsonObject entry;
       for(auto e:doc["entries"].as<JsonArray>())if(e["id"].as<String>()==selectedId)entry=e.as<JsonObject>();
-      if(entry.isNull()){go(Entries);return;}append(rows,entry["site"].as<const char*>());append(rows,"Login: ",entry["login"].as<const char*>());append(rows,"Password: ",revealed?entry["password"].as<const char*>():"********");
-      auto extras=entry["extras"].as<JsonArray>();for(auto e:extras){append(rows,"");append(rows,e["name"].as<const char*>(),": ",e["value"].as<const char*>());}lines(rows);footer("Hold SEL: show; LEFT: back");break;}
+      if(entry.isNull()){go(Entries);return;}
+      const char* site=entry["site"].as<const char*>();
+      const char* login=entry["login"].as<const char*>();
+      const char* password=entry["password"].as<const char*>();
+      append(rows,site&&*site?site:"-");
+      append(rows,"Login: ",login&&*login?login:"-");
+      append(rows,"Password: ",!password||!*password?"-":(revealed?password:"********"));
+      auto extras=entry["extras"].as<JsonArray>();
+      for(auto e:extras){
+        const char* value=e["value"].as<const char*>();
+        const char* name=e["name"].as<const char*>();
+        append(rows,name&&*name?name:"-",": ",!value||!*value?"-":(revealed?value:"********"));
+      }
+      lines(rows);footer("Hold SEL: show; LEFT: back");break;}
     case Connection:{title("Connection");append(rows,"Mode: "+Net::mode());append(rows,"SSID: ",Net::ssid().c_str());append(rows,"State: ",Net::stateName());if(Net::warning().length())append(rows,Net::warning());append(rows,"https://"+Net::ip());append(rows,"https://pps.local");
       bool bootstrap=Vault::state()==Vault::State::Empty||Vault::state()==Vault::State::Legacy;
       if(Net::mode()=="ap"){if(App::local()||bootstrap)append(rows,"Wi-Fi key: ",Net::apPassword().c_str());else append(rows,"Unlock PIN for Wi-Fi key");}if(App::setupReady())append(rows,"Setup code: ",App::setupCode().c_str());lines(rows);footer("UP/DOWN scroll LEFT back");break;}
@@ -226,16 +253,23 @@ void tick(){
   auto s=Vault::state();if(s!=lastState){lastState=s;dirty=true;if(s!=Vault::State::Unlocked){wipe(pinValue);wipe(firstPin);wipe(selectedId);if(screen!=Setup&&screen!=Locked&&screen!=Message)go(Locked);}}
   bool needsUnlock=screen==Menu||screen==Entries||screen==Details||screen==Mode||screen==Battery||screen==Sleep||((screen==Pin||screen==NewPin||screen==ConfirmPin)&&purpose==Change)||((screen==Reset1||screen==Reset2)&&s!=Vault::State::Corrupt&&s!=Vault::State::FsError);
   if(needsUnlock&&!App::local()){wipe(pinValue);wipe(firstPin);wipe(selectedId);go(Locked);}
-  String rev=Vault::revision();
-  if(rev!=lastRevision){
-    if(screen==Entries)invalidateEntryList();
-    lastRevision=rev;dirty=true;
+  if(now-revisionAt>=250){
+    revisionAt=now;
+    String rev=Vault::revision();
+    if(rev!=lastRevision){
+      if(screen==Entries)invalidateEntryList();
+      lastRevision=rev;dirty=true;
+    }
   }
   if(fence){if(allReleased())fence=false;}else for(int i=0;i<5;i++)if(buttons[i].event){act(i);if(fence)break;}
   bool show=screen==Details&&buttons[4].down&&!fence;if(show!=revealed){revealed=show;dirty=true;}
   if(sleepArmed&&allReleased()){sleepArmed=false;sleepNow();return;}
   if(now-batteryAt>=500){batteryAt=now;float sample=analogReadMilliVolts(Config::BATTERY)*0.001f*Config::DIVIDER*Config::CALIBRATION;voltage=voltage>0?voltage*.85f+sample*.15f:sample;if(screen==Battery)dirty=true;}
-  String net=Net::mode()+Net::ip()+Net::stateName()+Net::warning();if(net!=lastNet){dirty=true;lastNet=net;}
+  if(now-networkAt>=500){
+    networkAt=now;
+    String net=Net::mode()+Net::ip()+Net::stateName()+Net::warning();
+    if(net!=lastNet){dirty=true;lastNet=net;}
+  }
   bool setup=App::setupReady();if(setup!=lastSetup){lastSetup=setup;dirty=true;}
   if(screen==Setup&&!setup)go(Locked);
   if(dirty&&now-lastFrame>=40){dirty=false;lastFrame=now;draw();}
