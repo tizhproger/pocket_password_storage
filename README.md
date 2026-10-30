@@ -1,6 +1,6 @@
 # Pocket Password Storage (PPS)
 
-**Current firmware: `2.1.4`** · ESP32-C3 · local password vault · on-device PIN + HTTPS Web UI
+**Current firmware: `2.1.5`** · ESP32-C3 · local password vault · on-device PIN + HTTPS Web UI
 
 Pocket Password Storage is a small, locally operated password manager built around an ESP32 and a TFT display. Passwords are held in encrypted flash storage, accessed using the device's physical controls or over its local HTTPS interface. It does not require a cloud account or an Internet connection; Wi-Fi is used for local access.
 
@@ -97,13 +97,14 @@ Pocket Password Storage is a small, locally operated password manager built arou
 | **`2.1.1-recovery`** | Added a PIN-authorized way to migrate legacy data when the old master password is unavailable, plus offline flash-backup inspection and recovery tests. |
 | **`2.1.2-TLS`** | Device-specific TLS trust patch described in the TLS instructions. |
 | **`2.1.3`** | Extensive rework with updated toolchain/dependencies, TLS integration, Web UI workflow and larger vault limits. **The special 2.1.1 legacy-PIN recovery flow is not in this source tree.** |
-| **`2.1.4` (current)** | Improved WebUI usability. Added possibility to save cryptographic keys, seed phrases and secure codes. Added filtration by tags and search. Now view of the entered password while record creation is possible. |
+| **`2.1.4`** | Improved WebUI usability. Added possibility to save cryptographic keys, seed phrases and secure codes. Added filtration by tags and search. Now view of the entered password while record creation is possible. |
+| **`2.1.5` (current)** | Fixed records skipping on board. Reduced duplicate-ID validation. Added exposure of non-sensitive `Vault::read()` duration counters (last/peak ms). Added read duration in authenticated diagnostics and return of explicit 503 if the web request cannot be queued. Fixed debounce search rendering (180 ms). Added immediate remask revealed secrets when typing and displaying vault read durations in diagnostics. Added generator correct embeds limits from `PPS/config.h`, retaining of strict mode, and support **read-only** `--check` with nonzero exit code when out of date. |
 
 ### Alternative branch: `SoloVault` (initial version `0.1.0`)
 
 **SoloVault is a separate, from-scratch firmware architecture**, not another PPS 2.x update. Its initial `0.1.0` design carries over only the previously confirmed display/button pinout and ST7735 configuration; the PPS application sources, web client, authentication mechanisms, storage, backups and migration procedures are **not reused**.
 
-| Topic | PPS 2.1.4 | SoloVault 0.1.0 |
+| Topic | PPS 2.1.5 | SoloVault 0.1.0 |
 | --- | --- | --- |
 | Access | Local HTTPS Web UI and physical buttons | Physical buttons/display plus board-approved USB serial; **no Wi-Fi/BLE/HTTP/OTA** |
 | Unlock model | Master password and 6–8-digit physical PIN | Random **20-character / 100-bit owner code** generated and entered on the device |
