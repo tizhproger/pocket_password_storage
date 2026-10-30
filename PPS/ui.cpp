@@ -21,14 +21,24 @@ static Purpose purpose=Unlock;
 struct Button {int pin;bool raw=false,down=false;uint64_t changed=0,next=0;bool event=false;};
 static Button buttons[]={{Config::UP},{Config::DOWN},{Config::LEFT},{Config::RIGHT},{Config::SELECT}};
 static bool fence=true,dirty=true,revealed=false,sleepArmed=false,lastSetup=false;
-static int menu=0,entryIndex=0,scroll=0,digit=0;
+static int menu=0,entryIndex=0,entryCount=0,scroll=0,digit=0;
+static bool entryListReady=false;
+static String entryListRevision;
 static String pinValue,firstPin,selectedId,messageText,lastRevision,lastNet;
 static uint64_t lastFrame=0,batteryAt=0,splashUntil=0;
 static float voltage=0;
 static Vault::State lastState=Vault::State::FsError;
 static const char* menuItems[]={"Passwords","Connection","Battery","Sleep","About / TLS","Wi-Fi mode","Change PIN","Lock","Factory reset"};
 static bool allReleased(){for(auto& b:buttons)if(b.raw||b.down)return false;return true;}
-static void go(Screen next){screen=next;scroll=0;fence=true;revealed=false;dirty=true;sleepArmed=false;}
+static void invalidateEntryList(){
+  entryCount=0;
+  entryListReady=false;
+  wipe(entryListRevision);
+}
+static void go(Screen next){
+  if(next!=Entries||screen!=Entries)invalidateEntryList();
+  screen=next;scroll=0;fence=true;revealed=false;dirty=true;sleepArmed=false;
+}
 static void message(const String& s,Screen next=Locked){messageText=s;afterMessage=next;go(Message);}
 static void text(int x,int y,const char* s,uint16_t color=ST77XX_WHITE){
   tft.setCursor(x,y);tft.setTextColor(color);
@@ -102,8 +112,32 @@ static void act(int key){
     if(key==4)switch(menu){case 0:go(Entries);break;case 1:go(Connection);break;case 2:go(Battery);break;case 3:go(Sleep);break;case 4:go(About);break;case 5:go(Mode);break;case 6:startPin(Change);break;case 7:App::lock();go(Locked);break;case 8:go(Reset1);break;}return;
   }
   if(screen==Entries){
-    if(key==2){go(Menu);return;}SecureJson doc(Config::JSON_CAPACITY);if(!Vault::read(doc)){message(localError(Vault::lastResult()));return;}int n=doc["entries"].size();
-    if(n){if(key==0)entryIndex=(entryIndex+n-1)%n;if(key==1)entryIndex=(entryIndex+1)%n;if(key==4){entryIndex=std::min(entryIndex,n-1);selectedId=doc["entries"][entryIndex]["id"].as<String>();go(Details);}}return;
+    if(key==2){go(Menu);return;}
+    if(key!=0&&key!=1&&key!=4)return;
+
+    String currentRevision=Vault::revision();
+    if(!entryListReady||!currentRevision.length()||currentRevision!=entryListRevision){
+      invalidateEntryList();dirty=true;return;
+    }
+    if(entryCount==0)return;
+
+    if(key==0){entryIndex=(entryIndex+entryCount-1)%entryCount;return;}
+    if(key==1){entryIndex=(entryIndex+1)%entryCount;return;}
+
+    SecureJson doc(Config::JSON_CAPACITY);
+    if(!Vault::read(doc)){invalidateEntryList();message(localError(Vault::lastResult()));return;}
+    auto entries=doc["entries"].as<JsonArray>();
+    String verifiedRevision=Vault::revision();
+    if(!verifiedRevision.length()||verifiedRevision!=entryListRevision||int(entries.size())!=entryCount){
+      invalidateEntryList();dirty=true;return;
+    }
+    entryIndex=std::max(0,std::min(entryIndex,entryCount-1));
+    const char* id=entries[entryIndex]["id"].as<const char*>();
+    if(!id||strlen(id)!=32){invalidateEntryList();message(localError(Outcome::Invalid));return;}
+    selectedId=id;
+    if(selectedId.length()!=32||selectedId!=id){wipe(selectedId);invalidateEntryList();message(localError(Outcome::NoMemory));return;}
+    go(Details);
+    return;
   }
   if(screen==Details){if(key==2)go(Entries);if(key==0)scroll--;if(key==1)scroll++;return;}
   if(screen==Reset1){if(key==2)go(App::local()?Menu:Locked);if(key==4)go(Reset2);return;}
@@ -121,8 +155,37 @@ static void draw(){
     case Menu:title("Pocket Password Storage");for(int i=0;i<5;i++){int j=(menu+i)%9;text(0,13+i*11,String(i?"  ":"> ")+menuItems[j]);}footer("UP/DOWN  SEL: open");break;
     case Pin:case NewPin:case ConfirmPin:{title(screen==Pin?(purpose==Recover?"PIN: recover previous":"Enter current PIN"):screen==NewPin?"Choose new PIN":"Repeat new PIN");String mask;for(size_t i=0;i<pinValue.length();i++)mask+='*';text(0,15,mask+"  digit:"+String(digit));text(0,30,"RIGHT adds; LEFT erases");text(0,44,"6-8 digits, then SELECT");footer("UP/DOWN: choose digit");break;}
     case Setup:title("Setup / migration");append(rows,"Open HTTPS on browser");append(rows,"Code: ",App::setupCode().c_str());append(rows,"Expires after 3 minutes");append(rows,"RIGHT: network");lines(rows);footer("LEFT: cancel");break;
-    case Entries:{title("Passwords");SecureJson doc(Config::JSON_CAPACITY);if(!Vault::read(doc)){message(localError(Vault::lastResult()));return;}auto a=doc["entries"].as<JsonArray>();int n=a.size();
-      if(!n)text(0,15,"No entries. Use browser.");else{entryIndex=std::min(entryIndex,n-1);int selectedRow=0;for(int i=0;i<n;i++){if(i==entryIndex)selectedRow=rows.size();append(rows,i==entryIndex?"> ":"  ",a[i]["site"].as<const char*>());}scroll=std::min(selectedRow,std::max(0,int(rows.size())-5));rows.reset(scroll);for(int i=0;i<n;i++)append(rows,i==entryIndex?"> ":"  ",a[i]["site"].as<const char*>());lines(rows);}footer("SEL: open  LEFT: menu");break;}
+    case Entries:{
+      title("Passwords");
+      String beforeRevision=Vault::revision();
+      SecureJson doc(Config::JSON_CAPACITY);
+      if(!Vault::read(doc)){invalidateEntryList();message(localError(Vault::lastResult()));return;}
+      auto a=doc["entries"].as<JsonArray>();
+      int n=int(a.size());
+      String afterRevision=Vault::revision();
+      if(!beforeRevision.length()||beforeRevision!=afterRevision){
+        invalidateEntryList();dirty=true;return;
+      }
+      entryListRevision=afterRevision;
+      if(entryListRevision!=afterRevision){invalidateEntryList();message(localError(Outcome::NoMemory));return;}
+      entryCount=n;
+      entryListReady=true;
+      entryIndex=n?std::max(0,std::min(entryIndex,n-1)):0;
+      if(!n)text(0,15,"No entries. Use browser.");
+      else{
+        int selectedRow=0;
+        for(int i=0;i<n;i++){
+          if(i==entryIndex)selectedRow=rows.size();
+          append(rows,i==entryIndex?"> ":"  ",a[i]["site"].as<const char*>());
+        }
+        scroll=std::min(selectedRow,std::max(0,int(rows.size())-5));
+        rows.reset(scroll);
+        for(int i=0;i<n;i++)append(rows,i==entryIndex?"> ":"  ",a[i]["site"].as<const char*>());
+        lines(rows);
+      }
+      footer("SEL: open  LEFT: menu");
+      break;
+    }
     case Details:{title("Entry");SecureJson doc(Config::JSON_CAPACITY);if(!Vault::read(doc)){message(localError(Vault::lastResult()));return;}JsonObject entry;
       for(auto e:doc["entries"].as<JsonArray>())if(e["id"].as<String>()==selectedId)entry=e.as<JsonObject>();
       if(entry.isNull()){go(Entries);return;}append(rows,entry["site"].as<const char*>());append(rows,"Login: ",entry["login"].as<const char*>());append(rows,"Password: ",revealed?entry["password"].as<const char*>():"********");
@@ -154,7 +217,8 @@ void tick(){
   for(size_t i=0;i<5;i++){auto& b=buttons[i];bool raw=digitalRead(b.pin)==LOW;b.event=false;
     if(raw!=b.raw){b.raw=raw;b.changed=now;}
     if(now-b.changed>=30&&b.down!=raw){b.down=raw;if(raw){b.event=true;b.next=now+350;}}
-    if(i<2&&b.down&&now>=b.next){b.event=true;b.next=now+120;}
+    bool recordNavigation=screen==Menu||screen==Entries||screen==Details;
+    if(i<2&&!recordNavigation&&b.raw&&b.down&&now>=b.next){b.event=true;b.next=now+120;}
   }
 
   if(splashUntil){fence=true;if(now<splashUntil)return;splashUntil=0;dirty=true;}
@@ -162,11 +226,16 @@ void tick(){
   auto s=Vault::state();if(s!=lastState){lastState=s;dirty=true;if(s!=Vault::State::Unlocked){wipe(pinValue);wipe(firstPin);wipe(selectedId);if(screen!=Setup&&screen!=Locked&&screen!=Message)go(Locked);}}
   bool needsUnlock=screen==Menu||screen==Entries||screen==Details||screen==Mode||screen==Battery||screen==Sleep||((screen==Pin||screen==NewPin||screen==ConfirmPin)&&purpose==Change)||((screen==Reset1||screen==Reset2)&&s!=Vault::State::Corrupt&&s!=Vault::State::FsError);
   if(needsUnlock&&!App::local()){wipe(pinValue);wipe(firstPin);wipe(selectedId);go(Locked);}
+  String rev=Vault::revision();
+  if(rev!=lastRevision){
+    if(screen==Entries)invalidateEntryList();
+    lastRevision=rev;dirty=true;
+  }
   if(fence){if(allReleased())fence=false;}else for(int i=0;i<5;i++)if(buttons[i].event){act(i);if(fence)break;}
   bool show=screen==Details&&buttons[4].down&&!fence;if(show!=revealed){revealed=show;dirty=true;}
   if(sleepArmed&&allReleased()){sleepArmed=false;sleepNow();return;}
   if(now-batteryAt>=500){batteryAt=now;float sample=analogReadMilliVolts(Config::BATTERY)*0.001f*Config::DIVIDER*Config::CALIBRATION;voltage=voltage>0?voltage*.85f+sample*.15f:sample;if(screen==Battery)dirty=true;}
-  String rev=Vault::revision(),net=Net::mode()+Net::ip()+Net::stateName()+Net::warning();if(rev!=lastRevision||net!=lastNet){dirty=true;lastRevision=rev;lastNet=net;}
+  String net=Net::mode()+Net::ip()+Net::stateName()+Net::warning();if(net!=lastNet){dirty=true;lastNet=net;}
   bool setup=App::setupReady();if(setup!=lastSetup){lastSetup=setup;dirty=true;}
   if(screen==Setup&&!setup)go(Locked);
   if(dirty&&now-lastFrame>=40){dirty=false;lastFrame=now;draw();}
