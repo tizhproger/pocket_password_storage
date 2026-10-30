@@ -69,7 +69,7 @@ Pocket Password Storage is a small, locally operated password manager built arou
 
 ### Here is a few pics of UI
 
-> Logo can be changed to anything. It is located in `Logo.h` file.
+> Logo can be changed to anything. It is located in [`Logo.h`](PPS/Logo.h) file.
 
 ![Logo](images/PPS_Logo.jpg)
 
@@ -97,7 +97,7 @@ Pocket Password Storage is a small, locally operated password manager built arou
 | **`2.1.1-recovery`** | Added a PIN-authorized way to migrate legacy data when the old master password is unavailable, plus offline flash-backup inspection and recovery tests. |
 | **`2.1.2-TLS`** | Device-specific TLS trust patch described in the TLS instructions. |
 | **`2.1.3`** | Extensive rework with updated toolchain/dependencies, TLS integration, Web UI workflow and larger vault limits. **The special 2.1.1 legacy-PIN recovery flow is not in this source tree.** |
-| **`2.1.4` (current)** | Improved WebUI usability. Added possibility to write cryptographic keys and seed phrases. Added filtration by tags and search. Now view entered password is possible. |
+| **`2.1.4` (current)** | Improved WebUI usability. Added possibility to save cryptographic keys, seed phrases and secure codes. Added filtration by tags and search. Now view of the entered password while record creation is possible. |
 
 ### Alternative branch: `SoloVault` (initial version `0.1.0`)
 
