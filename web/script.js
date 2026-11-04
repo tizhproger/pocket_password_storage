@@ -1,4 +1,5 @@
 'use strict';
+const PPS_LIMITS=Object.freeze({maxEntries:128,vaultBytes:32768});
 const PPS = (() => {
   const enc=new TextEncoder(), dec=new TextDecoder('utf-8',{fatal:true});
   const byteLength=s=>enc.encode(s).length;
@@ -99,7 +100,7 @@ if(typeof document!=='undefined'){
       throw e;
     }finally{clearTimeout(timeout);}
     if(response.status===401&&token)clearClient();
-    if(!response.ok){const errors={memory_unavailable:'Not enough RAM. Close unnecessary connections, refresh the list, and check the result before trying again.',invalid_request:'Invalid values. Check the fields and their limits.',invalid_credentials:'Incorrect current password.',storage_error:'Device storage error. Refresh the data before trying again.',vault_corrupt:'The vault is corrupted. Use recovery on the device.',no_previous_snapshot:'No valid previous snapshot is available. Import a backup.',unavailable:'This operation is currently unavailable. Check the device status.',serialization_error:'Could not prepare the complete device response.',setup_failed:'Setup or migration is incomplete. Check the status on the device.',session_expired:'Session ended. Log in again.'};if(body.error&&errors[body.error])throw new Error(errors[body.error]);if(response.status===409)throw new Error('The data has changed. Close the form, refresh the list, and try the change again.');if(response.status===429)throw new Error('Too many attempts. Wait and try again.');throw new Error(body.message||'Device error');}
+    if(!response.ok){const errors={memory_unavailable:'Not enough RAM. Close unnecessary connections, refresh the list, and check the result before trying again.',invalid_request:'Invalid values. Check the fields and their limits.',invalid_credentials:'Incorrect current password.',storage_error:'Device storage error. Refresh the data before trying again.',vault_corrupt:'The vault is corrupted. Use recovery on the device.',no_previous_snapshot:'No valid previous snapshot is available. Import a backup.',unavailable:'This operation is currently unavailable. Check the device status.',serialization_error:'Could not prepare the complete device response.',device_busy:'Device busy. Let the current operation finish; refresh and verify the result before retrying.',setup_failed:'Setup or migration is incomplete. Check the status on the device.',session_expired:'Session ended. Log in again.'};if(body.error&&errors[body.error])throw new Error(errors[body.error]);if(response.status===409)throw new Error('The data has changed. Close the form, refresh the list, and try the change again.');if(response.status===429)throw new Error('Too many attempts. Wait and try again.');throw new Error(body.message||'Device error');}
     return {body,response};
   }
   function showPassword(visible){

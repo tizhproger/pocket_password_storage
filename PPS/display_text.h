@@ -226,6 +226,30 @@ class Rows {
   }
 };
 
+inline size_t countRows(const char* first,const char* second="",const char* third=""){
+  size_t rows=0,bytes=0;
+  int width=0;
+  for(const char* part:{first,second,third}){
+    const unsigned char* p=reinterpret_cast<const unsigned char*>(part?part:"");
+    while(*p){
+      uint32_t cp=nextCodepoint(p);
+      if(cp=='\n'){
+        if(bytes){++rows;bytes=0;width=0;}
+        continue;
+      }
+      cp=normalize(cp);if(!cp)continue;
+      const int px=glyphWidth(cp);
+      char encoded[4];const size_t n=writeUtf8(encoded,cp);
+      if(bytes&&(width+px>MAX_ROW_PIXELS||bytes+n>=ROW_BYTES)){
+        ++rows;bytes=0;width=0;
+      }
+      if(bytes+n>=ROW_BYTES)continue;
+      bytes+=n;width+=px;
+    }
+  }
+  return rows+(bytes?1u:0u);
+}
+
 inline void append(Rows& rows,const char* first,const char* second="",const char* third="") {
   Line line;
   size_t n=0;

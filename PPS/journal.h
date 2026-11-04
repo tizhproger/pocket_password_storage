@@ -12,7 +12,7 @@ template<class IO> bool publish(IO& io,const uint8_t* bytes,size_t n,const Ref& 
   if(!io.writeSlot(next.slot,bytes,n)||!io.verifySlot(next))return false;
   Head wanted{};wanted.magic=MAGIC;wanted.current=next;
   if(old.magic==MAGIC)wanted.previous=old.current;
-  io.writeHead(wanted);
+  if(!io.writeHead(wanted))return false;
   Head actual{};if(!io.readHead(actual)||memcmp(&actual,&wanted,sizeof(actual)))return false;
   committed=actual;return true;
 }

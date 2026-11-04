@@ -287,21 +287,55 @@ bool initialize(const String& password,const String& pin,bool migrate){
 }
 bool recoverPrevious(const String& pin){
   PpsMemory::Attempt memory;last=Outcome::Credentials;
-  if(status!=State::Corrupt||!mounted)return false;
-  Journal::Ref ref{};Bytes blob;Header h{};
-  if(head.magic==Journal::MAGIC){ref=head.previous;if(!loadRef(ref,blob,&h))return failure(memory.failed()?Outcome::NoMemory:Outcome::NoPrevious);}
-  else {
-    for(uint32_t slot=0;slot<2;slot++){Bytes candidate;Header test;
-      if(readFile(slotPath(slot),candidate,sizeof(Header)+Config::VAULT_MAX)&&structure(candidate,test)&&test.generation>ref.generation){
-        ref.slot=slot;ref.generation=test.generation;ref.length=candidate.size();if(!Crypto::hash(candidate.data(),candidate.size(),ref.digest))return false;blob=std::move(candidate);h=test;
-      }
-    }
-    if(memory.failed())return failure(Outcome::NoMemory);if(!ref.generation)return failure(Outcome::NoPrevious);
+  if(status!=State::Corrupt||!mounted)return failure(Outcome::Unavailable);
+  Journal::Ref selected{};Header selectedHeader{};
+  bool found=false;
+  bool trustedPrevious=false;
+  if(head.magic==Journal::MAGIC){
+    Journal::Ref candidateRef=head.previous;
+    Bytes candidate;Header candidateHeader{};Secret<32> key;
+    SecureJson verified(Config::JSON_CAPACITY);
+    if(loadRef(candidateRef,candidate,&candidateHeader)){
+      trustedPrevious=true;
+      if(!unwrap(pin,candidateHeader,true,key.data)||
+         !decode(candidate,candidateHeader,key.data,verified))
+        return failure(memory.failed()?Outcome::NoMemory:Outcome::Credentials);
+      selected=candidateRef;selectedHeader=candidateHeader;found=true;
+    }else if(memory.failed())return failure(Outcome::NoMemory);
   }
-  Secret<32> key;SecureJson doc(Config::JSON_CAPACITY);if(!unwrap(pin,h,true,key.data)||!decode(blob,h,key.data,doc))return failure(memory.failed()?Outcome::NoMemory:Outcome::Credentials);
-  Journal::Head next{};next.magic=Journal::MAGIC;next.current=ref;DiskIO io;io.writeHead(next);Journal::Head observed{};
-  if(!io.readHead(observed)||memcmp(&next,&observed,sizeof(next)))return false;
-  head=next;header=h;status=State::Locked;last=Outcome::Ok;return true;
+  if(!trustedPrevious){
+    for(uint32_t slot=0;slot<2;slot++){
+      Bytes candidate;Header candidateHeader{};
+      if(!readFile(slotPath(slot),candidate,sizeof(Header)+Config::VAULT_MAX)){
+        if(memory.failed())return failure(Outcome::NoMemory);
+        continue;
+      }
+      if(!structure(candidate,candidateHeader)||
+         (found&&candidateHeader.generation<=selected.generation))continue;
+      Secret<32> key;SecureJson verified(Config::JSON_CAPACITY);
+      if(!unwrap(pin,candidateHeader,true,key.data)||
+         !decode(candidate,candidateHeader,key.data,verified)){
+        // Never treat an allocation failure as a wrong PIN or corrupt slot.
+        if(memory.failed())return failure(Outcome::NoMemory);
+        continue;
+      }
+      Journal::Ref ref{};ref.slot=slot;
+      ref.generation=candidateHeader.generation;
+      ref.length=candidate.size();
+      if(!Crypto::hash(candidate.data(),candidate.size(),ref.digest))
+        return failure(memory.failed()?Outcome::NoMemory:Outcome::Storage);
+      selected=ref;selectedHeader=candidateHeader;found=true;
+    }
+  }
+  if(!found)return failure(memory.failed()?Outcome::NoMemory:Outcome::NoPrevious);
+  Journal::Head next{};next.magic=Journal::MAGIC;next.current=selected;
+  DiskIO io;
+  if(!io.writeHead(next))return failure(Outcome::Storage);
+  Journal::Head observed{};
+  if(!io.readHead(observed)||memcmp(&next,&observed,sizeof(next)))
+    return failure(Outcome::Storage);
+  head=next;header=selectedHeader;status=State::Locked;
+  last=Outcome::Ok;return true;
 }
 bool reset(bool allowFormat){
   lock();if(!mounted){if(!allowFormat||!SPIFFS.format()||!SPIFFS.begin(false))return false;mounted=true;}

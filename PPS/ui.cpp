@@ -188,15 +188,16 @@ static void draw(){
       entryIndex=n?std::max(0,std::min(entryIndex,n-1)):0;
       if(!n)text(0,15,"No entries. Use browser.");
       else{
-        int selectedRow=0;
+        int selectedRow=0,totalRows=0;
         for(int i=0;i<n;i++){
-          if(i==entryIndex)selectedRow=rows.size();
-          append(rows,i==entryIndex?"> ":"  ",a[i]["site"].as<const char*>());
+          if(i==entryIndex)selectedRow=totalRows;
+          totalRows+=DisplayText::countRows(i==entryIndex?"> ":"  ",a[i]["site"].as<const char*>());
         }
-        scroll=std::min(selectedRow,std::max(0,int(rows.size())-5));
+        scroll=std::min(selectedRow,std::max(0,totalRows-5));
         rows.reset(scroll);
         for(int i=0;i<n;i++)append(rows,i==entryIndex?"> ":"  ",a[i]["site"].as<const char*>());
         lines(rows);
+        text(112,0,String(entryIndex+1)+"/"+String(n),ST77XX_CYAN);
       }
       footer("SEL: open  LEFT: menu");
       break;
@@ -214,9 +215,28 @@ static void draw(){
       for(auto e:extras){
         const char* value=e["value"].as<const char*>();
         const char* name=e["name"].as<const char*>();
+        if(name&&!strcmp(name,"__pps_tags_v1")){
+          if(!value||!*value){append(rows,"Tags: -");continue;}
+          if(!revealed){append(rows,"Tags: ********");continue;}
+          SecureJson tags(2048);
+          if(deserializeChecked(tags,reinterpret_cast<const uint8_t*>(value),strlen(value))&&tags.is<JsonArray>()){
+            String displayed;
+            bool valid=tags.as<JsonArray>().size()<=8;
+            for(JsonVariant tag:tags.as<JsonArray>()){
+              if(!tag.is<const char*>()||tag.as<JsonString>().size()>32){valid=false;break;}
+              if(displayed.length())displayed+=", ";
+              displayed+=tag.as<const char*>();
+            }
+            if(valid){append(rows,"Tags: ",displayed.length()?displayed.c_str():"-");wipe(displayed);continue;}
+            wipe(displayed);
+          }
+          append(rows,"Tags: ********");continue;
+        }
         append(rows,name&&*name?name:"-",": ",!value||!*value?"-":(revealed?value:"********"));
       }
-      lines(rows);footer("Hold SEL: show; LEFT: back");break;}
+      lines(rows);
+      if(rows.size()>5)text(112,0,String(scroll+1)+"/"+String(rows.size()),ST77XX_CYAN);
+      footer("Hold SEL: show; LEFT: back");break;}
     case Connection:{title("Connection");append(rows,"Mode: "+Net::mode());append(rows,"SSID: ",Net::ssid().c_str());append(rows,"State: ",Net::stateName());if(Net::warning().length())append(rows,Net::warning());append(rows,"https://"+Net::ip());append(rows,"https://pps.local");
       bool bootstrap=Vault::state()==Vault::State::Empty||Vault::state()==Vault::State::Legacy;
       if(Net::mode()=="ap"){if(App::local()||bootstrap)append(rows,"Wi-Fi key: ",Net::apPassword().c_str());else append(rows,"Unlock PIN for Wi-Fi key");}if(App::setupReady())append(rows,"Setup code: ",App::setupCode().c_str());lines(rows);footer("UP/DOWN scroll LEFT back");break;}

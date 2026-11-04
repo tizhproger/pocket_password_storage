@@ -245,7 +245,7 @@ void stop(){
 }
 void tick(){
   portENTER_CRITICAL(&mux);Job* job=pending;pending=nullptr;portEXIT_CRITICAL(&mux);if(!job)return;
-  dispatch(job->request);
-  job->result=ESP_FAIL;xSemaphoreGive(job->done);
+  job->result=dispatch(job->request);
+  xSemaphoreGive(job->done);
 }
 }
