@@ -1,66 +1,68 @@
 #!/usr/bin/env python3
-"""Embed the browser sources in firmware. --check is read-only (CI safe)."""
-from __future__ import annotations
+"""Generate or verify PPS/web_assets.h from the three editable web sources.
 
+Usage:
+  python tools/embed_web.py
+  python tools/embed_web.py --check  # non-mutating consistency check (CI)
+
+PPS_LIMITS is compiled from config.h macros, not fixed JS literals.
+"""
+from pathlib import Path
 import argparse
 import sys
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-TARGET = ROOT / "PPS" / "web_assets.h"
-DELIMITER = "PPSWEB"
+OUT = ROOT / 'PPS' / 'web_assets.h'
+WEB = ROOT / 'web'
+DELIMITER = 'PPSWEB'
+JS_PREFIX = "'use strict';\n"
+JS_LIMITS = 'const PPS_LIMITS=Object.freeze({maxEntries:256,vaultBytes:32768});\n'
 
 
-def raw_asset(text: str) -> str:
-    if f"){DELIMITER}\"" in text:
-        raise ValueError("Web asset contains the C++ raw-string terminator")
-    return f'R"{DELIMITER}({text}){DELIMITER}"'
+def get(name):
+    text = (WEB / name).read_text(encoding='utf-8')
+    if '\x00' in text or f'){DELIMITER}"' in text:
+        raise ValueError(f'{name}: forbidden NUL or raw-string terminator')
+    return text
 
 
-def generate() -> str:
-    index = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
-    script = (ROOT / "web" / "script.js").read_text(encoding="utf-8")
-    style = (ROOT / "web" / "style.css").read_text(encoding="utf-8")
-    strict_prefix = "'use strict';\n"
-    if not script.startswith(strict_prefix):
-        raise ValueError('script.js must start with a strict-mode directive')
-    script = script[len(strict_prefix):]
-    # The JS source refers to PPS_LIMITS. Keep these limits tied to config.h;
-    # never hardcode a duplicate record or vault size in the browser.
-    return (
-        '#pragma once\n#include <Arduino.h>\n#include "config.h"\n'
-        f'static const char WEB_INDEX[] PROGMEM =\n{raw_asset(index)};\n'
-        'static const char WEB_SCRIPT[] PROGMEM =\n'
-        '"\'use strict\';\\n"\n'
-        '"const PPS_LIMITS=Object.freeze({maxEntries:" PPS_STRINGIFY(PPS_MAX_ENTRIES)\n'
-        '",vaultBytes:" PPS_STRINGIFY(PPS_VAULT_MAX_BYTES) "});\\n"\n'
-        f'{raw_asset(script)};\n'
-        f'static const char WEB_STYLE[] PROGMEM =\n{raw_asset(style)};\n'
-    )
+def generate():
+    index = get('index.html')
+    script = get('script.js')
+    style = get('style.css')
+    if not script.startswith(JS_PREFIX + JS_LIMITS):
+        raise ValueError('script.js must start with strict mode and the PPS_LIMITS test defaults')
+    script = script[len(JS_PREFIX + JS_LIMITS):]
+    # Config values in the firmware remain authoritative even if their
+    # defaults are changed. The JS test defaults are for local JS checks only.
+    return ('#pragma once\n#include <Arduino.h>\n#include "config.h"\n'
+            f'static const char WEB_INDEX[] PROGMEM =\nR"{DELIMITER}({index}){DELIMITER}";\n'
+            'static const char WEB_SCRIPT[] PROGMEM =\n'
+            '"\'use strict\';\\n"\n'
+            '"const PPS_LIMITS=Object.freeze({maxEntries:" PPS_STRINGIFY(PPS_MAX_ENTRIES)\n'
+            '",vaultBytes:" PPS_STRINGIFY(PPS_VAULT_MAX_BYTES) "});\\n"\n'
+            f'R"{DELIMITER}({script}){DELIMITER}";\n'
+            f'static const char WEB_STYLE[] PROGMEM =\nR"{DELIMITER}({style}){DELIMITER}";\n')
 
 
-def main() -> int:
+def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--check', action='store_true', help='verify generated file without changing it')
+    parser.add_argument('--check', action='store_true', help='verify assets without modifying files')
     args = parser.parse_args()
     try:
-        expected = generate()
-    except (OSError, UnicodeError, ValueError) as exc:
-        print(f'Web assets: {exc}', file=sys.stderr)
-        return 2
-    current = TARGET.read_text(encoding='utf-8') if TARGET.exists() else None
-    if args.check:
-        if current != expected:
-            print('web_assets.h is outdated; run python tools/embed_web.py', file=sys.stderr)
-            return 1
-        print('web_assets.h is up to date')
+        content = generate()
+        if args.check:
+            if not OUT.exists() or OUT.read_text(encoding='utf-8') != content:
+                print('web_assets.h is out of date: run python tools/embed_web.py', file=sys.stderr)
+                return 1
+            print('web_assets.h matches the web sources')
+        else:
+            OUT.write_text(content, encoding='utf-8', newline='\n')
+            print(f'Wrote {OUT.relative_to(ROOT)}')
         return 0
-    if current != expected:
-        TARGET.write_text(expected, encoding='utf-8')
-        print('Updated PPS/web_assets.h')
-    else:
-        print('PPS/web_assets.h is already up to date')
-    return 0
+    except (OSError, ValueError) as exc:
+        print(f'embed_web.py: {exc}', file=sys.stderr)
+        return 2
 
 
 if __name__ == '__main__':

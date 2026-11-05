@@ -2,7 +2,7 @@
 #define PPS_PROJECT_CONFIG_H_INCLUDED
 
 #include <Arduino.h>
-#define PPS_MAX_ENTRIES 128
+#define PPS_MAX_ENTRIES 256
 #define PPS_VAULT_MAX_BYTES 32768
 #define PPS_STRINGIFY_INNER(x) #x
 #define PPS_STRINGIFY(x) PPS_STRINGIFY_INNER(x)
@@ -19,7 +19,7 @@ constexpr size_t MAX_ENTRIES=PPS_MAX_ENTRIES, MAX_EXTRAS=8;
 constexpr uint32_t KDF_ROUNDS=120000;
 constexpr uint64_t AUTOLOCK_MS=120000, SESSION_MS=1800000, SETUP_MS=180000;
 constexpr uint64_t BOOT_LOGO_MS=1500;
-constexpr const char* VERSION="2.1.6";
+constexpr const char* VERSION="2.1.7";
 }
 
 #endif

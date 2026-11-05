@@ -48,7 +48,7 @@ R"PPSWEB(<!doctype html>
 <dialog id="settingsDialog"><h2>Settings</h2><button type="button" id="diagnostics" class="secondary">Memory and libraries</button><pre id="diagnosticsResult" role="status"></pre><p id="networkWarning" class="hint"></p><form id="networkForm"><label>Mode<select id="wifiMode"><option value="ap">Access point</option><option value="wifi">Home network</option></select></label><label>Home network SSID<input id="ssid" maxlength="32" autocomplete="off"></label><label>New home network password<input id="wifiPassword" type="password" maxlength="63" autocomplete="new-password" placeholder="Leave blank to keep the current password"></label><label class="check"><input id="openWifi" type="checkbox">Home network without a password</label><label>Access point SSID<input id="apSsid" required maxlength="32" autocomplete="off"></label><label>New access point password<input id="apPassword" type="password" maxlength="63" autocomplete="new-password" placeholder="Leave blank to keep the current password"></label><div class="actions"><button>Save network settings</button><button type="button" id="applyNetwork" class="secondary">Apply and reconnect</button></div></form><hr>
 <form id="masterForm"><h3>Change master password</h3><label>Current password<input id="oldMaster" type="password" required maxlength="128" autocomplete="current-password"></label><label>New password (at least 12 bytes)<input id="newMaster" type="password" required maxlength="128" autocomplete="new-password"></label><label>Repeat new password<input id="newMasterConfirm" type="password" required maxlength="128" autocomplete="new-password"></label><button>Change and lock</button></form><p class="hint">The PIN is changed using the device buttons after entering the current PIN.</p><button data-close="settingsDialog" class="secondary">Close</button></dialog>
 <button type="button" id="backToTop" class="backToTop" aria-label="Back to top" hidden>↑ Back to top</button>
-<footer>Original project: <a href='https://github.com/tizhproger/pocket_password_storage'>tizhproger</a> · Version 2.1.6</footer></body></html>)PPSWEB";
+<footer>Original project: <a href='https://github.com/tizhproger/pocket_password_storage'>tizhproger</a> · Version 2.1.7</footer></body></html>)PPSWEB";
 static const char WEB_SCRIPT[] PROGMEM =
 "'use strict';\n"
 "const PPS_LIMITS=Object.freeze({maxEntries:" PPS_STRINGIFY(PPS_MAX_ENTRIES)
@@ -105,6 +105,17 @@ R"PPSWEB(const PPS = (() => {
     }
     insist(byteLength(JSON.stringify(data))<=PPS_LIMITS.vaultBytes,'Storage size exceeds '+(PPS_LIMITS.vaultBytes/1024)+' KiB');return data;
   }
+  function estimateRemaining(data){
+    const usedBytes=byteLength(JSON.stringify(data));
+    const remainingBytes=Math.max(0,PPS_LIMITS.vaultBytes-usedBytes);
+    const count=data.entries.length;
+    const remainingCount=Math.max(0,PPS_LIMITS.maxEntries-count);
+    const baseBytes=byteLength(JSON.stringify({schema:2,entries:[]}));
+    const averageBytes=count>0?Math.max(1,(usedBytes-baseBytes)/count):0;
+    const estimatedAdditional=count>0?
+      Math.min(remainingCount,Math.floor(remainingBytes/averageBytes)):null;
+    return {usedBytes,remainingBytes,remainingCount,estimatedAdditional};
+  }
   const hex=a=>Array.from(a,x=>x.toString(16).padStart(2,'0')).join('');
   function unhex(s,n){insist(typeof s==='string'&&s.length===n*2&&/^[a-f0-9]+$/i.test(s));return Uint8Array.from(s.match(/../g),x=>parseInt(x,16));}
   function b64(a){let s='';for(const x of a)s+=String.fromCharCode(x);return btoa(s);}
@@ -119,7 +130,7 @@ R"PPSWEB(const PPS = (() => {
   }
   function randomInt(n){const limit=Math.floor(256/n)*n,a=new Uint8Array(1);do{crypto.getRandomValues(a);}while(a[0]>=limit);return a[0]%n;}
   function generatePassword(n=20){insist(Number.isInteger(n)&&n>=12&&n<=128);const groups=['ABCDEFGHJKLMNPQRSTUVWXYZ','abcdefghijkmnopqrstuvwxyz','23456789','!@#$%&*+-=?'];const all=groups.join(''),a=groups.map(g=>g[randomInt(g.length)]);while(a.length<n)a.push(all[randomInt(all.length)]);for(let i=a.length-1;i>0;i--){let j=randomInt(i+1);[a[i],a[j]]=[a[j],a[i]];}return a.join('');}
-  return {limits:PPS_LIMITS,validate,encryptBackup,decryptBackup,generatePassword,byteLength,parseTags,tagMetadata,tagsFor,withTags,matches,fold};
+  return {limits:PPS_LIMITS,validate,estimateRemaining,encryptBackup,decryptBackup,generatePassword,byteLength,parseTags,tagMetadata,tagsFor,withTags,matches,fold};
 })();
 if(typeof module!=='undefined')module.exports=PPS;
 if(typeof document!=='undefined'){
@@ -204,7 +215,11 @@ if(typeof document!=='undefined'){
     if(searchTimer!==null){clearTimeout(searchTimer);searchTimer=null;}
     mask();syncTagFilter();$('records').replaceChildren();
     const visible=records.entries.filter(e=>PPS.matches(e,$('search').value,$('searchMatch').value==='exact',$('tagFilter').value));
-    $('count').textContent=visible.length+' shown · '+records.entries.length+' / '+PPS.limits.maxEntries+' records · '+(PPS.byteLength(JSON.stringify(records))/1024).toFixed(1)+' / '+(PPS.limits.vaultBytes/1024)+' KiB';
+    const space=PPS.estimateRemaining(records);
+    $('count').textContent=visible.length+' shown · '+records.entries.length+' / '+PPS.limits.maxEntries+' records (safety cap) · '+
+      (space.usedBytes/1024).toFixed(1)+' / '+(PPS.limits.vaultBytes/1024)+' KiB · '+
+      (space.remainingBytes/1024).toFixed(1)+' KiB free'+
+      (space.estimatedAdditional===null?'':' · ~'+space.estimatedAdditional+' more at current average size (estimate; RAM may limit)');
     if(!visible.length)$('records').append(element('p',records.entries.length?'No matching records. Change or clear the filters.':'No records yet. Add your first record.'));
     for(const e of visible){
       const card=element('article'),secrets=[],meta=PPS.tagMetadata(e);card.dataset.id=e.id;
