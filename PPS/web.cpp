@@ -82,6 +82,54 @@ static esp_err_t noMemory(httpd_req_t* r){
   static const char failure[]="{\"ok\":false,\"error\":\"memory_unavailable\",\"message\":\"Low memory; close other connections, reload and check the result before retrying\"}";
   return send(r,503,"application/json; charset=utf-8",failure,sizeof(failure)-1);
 }
+class JsonChunkWriter final : public Print {
+  httpd_req_t* request_;
+  uint8_t chunk_[1024]{};
+  size_t used_=0;
+  bool healthy_=true;
+  bool flushChunk(){
+    if(!healthy_)return false;
+    if(!used_)return true;
+    const esp_err_t rc=httpd_resp_send_chunk(request_,reinterpret_cast<const char*>(chunk_),used_);
+    wipe(chunk_,used_);used_=0;
+    healthy_=rc==ESP_OK;
+    return healthy_;
+  }
+ public:
+  explicit JsonChunkWriter(httpd_req_t* request):request_(request){}
+  ~JsonChunkWriter(){wipe(chunk_,sizeof(chunk_));}
+  using Print::write;
+  size_t write(uint8_t byte) override {return write(&byte,1);}
+  size_t write(const uint8_t* data,size_t length) override {
+    if(!healthy_||(!data&&length))return 0;
+    size_t written=0;
+    while(written<length){
+      const size_t take=std::min(length-written,sizeof(chunk_)-used_);
+      memcpy(chunk_+used_,data+written,take);used_+=take;written+=take;
+      if(used_==sizeof(chunk_)&&!flushChunk())break;
+    }
+    return written;
+  }
+  bool finish(size_t expected,size_t actual){
+    if(!healthy_||actual!=expected||!flushChunk())return false;
+    return httpd_resp_send_chunk(request_,nullptr,0)==ESP_OK;
+  }
+};
+static esp_err_t streamJson(httpd_req_t* r,const SecureJson& doc){
+  PpsMemory::Attempt memory;
+  if(doc.overflowed())return noMemory(r);
+  const size_t length=measureJson(doc.as<JsonVariantConst>());
+  if(!length||length>Config::VAULT_MAX){
+    static const char failure[]="{\"ok\":false,\"error\":\"serialization_error\",\"message\":\"Invalid record response size\"}";
+    return send(r,500,"application/json; charset=utf-8",failure,sizeof(failure)-1);
+  }
+  if(memory.failed())return noMemory(r);
+  if(httpd_resp_set_status(r,"200 OK")!=ESP_OK||
+     httpd_resp_set_type(r,"application/json; charset=utf-8")!=ESP_OK)return ESP_FAIL;
+  JsonChunkWriter writer(r);
+  const size_t actual=serializeJson(doc,writer);
+  return writer.finish(length,actual)?ESP_OK:ESP_FAIL;
+}
 static esp_err_t json(httpd_req_t* r,const SecureJson& doc,int code=200){
   PpsMemory::Attempt memory;Bytes b;if(!serializeChecked(doc,b,Config::REQUEST_MAX)){if(memory.failed())return noMemory(r);static const char failure[]="{\"ok\":false,\"error\":\"serialization_error\",\"message\":\"Response serialization failed\"}";return send(r,500,"application/json; charset=utf-8",failure,sizeof(failure)-1);}
   return send(r,code,"application/json; charset=utf-8",b.data(),b.size()-1);
@@ -150,6 +198,13 @@ static esp_err_t dispatch(httpd_req_t* r){
     SecureJson out(4096);out["firmware"]=Config::VERSION;out["arduinojson"]=ARDUINOJSON_VERSION;out["mbedtls"]=MBEDTLS_VERSION_STRING;
     out["tls_sdk_review_required"]=MBEDTLS_VERSION_NUMBER<0x03060700;out["max_entries"]=Config::MAX_ENTRIES;out["vault_max_bytes"]=Config::VAULT_MAX;out["json_budget_bytes"]=Config::JSON_CAPACITY;
     out["allocation_failures"]=PpsMemory::failures.load(std::memory_order_relaxed);
+    out["heap_reserve_failures"]=PpsMemory::heapReserveFailures.load(std::memory_order_relaxed);
+    out["largest_block_failures"]=PpsMemory::largestBlockFailures.load(std::memory_order_relaxed);
+    out["json_budget_failures"]=PpsMemory::jsonBudgetFailures.load(std::memory_order_relaxed);
+    out["malloc_failures"]=PpsMemory::mallocFailures.load(std::memory_order_relaxed);
+    out["other_allocation_failures"]=PpsMemory::otherFailures.load(std::memory_order_relaxed);
+    out["last_failed_allocation_bytes"]=PpsMemory::lastFailedAllocationBytes.load(std::memory_order_relaxed);
+    out["last_allocation_failure_reason"]=PpsMemory::reasonName(static_cast<PpsMemory::FailureReason>(PpsMemory::lastFailureReason.load(std::memory_order_relaxed)));
     out["vault_read_last_ms"]=Vault::readLastMillis();
     out["vault_read_peak_ms"]=Vault::readPeakMillis();
 #ifdef ARDUINO_ARCH_ESP32
@@ -173,7 +228,7 @@ static esp_err_t dispatch(httpd_req_t* r){
     String currentRevision=Vault::revision();if(memory.failed())return noMemory(r);if(strcmp(input["revision"].as<const char*>(),currentRevision.c_str()))return operation(r,Outcome::Conflict,"");
     SecretString password(input["password"].as<const char*>());if(memory.failed())return noMemory(r);return operation(r,App::restorePrevious(password.value),"Previous data restored; all sessions locked");
   }
-  if(path=="/api/records"&&get){SecureJson out(Config::JSON_CAPACITY);if(!Vault::read(out))return operation(r,Vault::lastResult(),"");String rev=Vault::revision();if(memory.failed())return noMemory(r);if(httpd_resp_set_hdr(r,"X-Vault-Revision",rev.c_str())!=ESP_OK)return ESP_FAIL;return json(r,out);}
+  if(path=="/api/records"&&get){SecureJson out(Config::JSON_CAPACITY);if(!Vault::read(out))return operation(r,Vault::lastResult(),"");String rev=Vault::revision();if(memory.failed())return noMemory(r);if(httpd_resp_set_hdr(r,"X-Vault-Revision",rev.c_str())!=ESP_OK)return ESP_FAIL;return streamJson(r,out);}
   if(!get&&(path=="/api/add"||path=="/api/edit"||path=="/api/delete"||path=="/api/import")){
     bool shape=path=="/api/import"?fields(input.as<JsonVariantConst>(),{"revision","data","legacy","confirm_replace"}):path=="/api/delete"?fields(input.as<JsonVariantConst>(),{"revision","id"}):path=="/api/add"?fields(input.as<JsonVariantConst>(),{"revision","entry"}):fields(input.as<JsonVariantConst>(),{"revision","id","entry"});
     if(!shape)return result(r,400,"Unexpected or missing fields");
@@ -200,6 +255,8 @@ static esp_err_t dispatch(httpd_req_t* r){
     }
     if(doc.overflowed())return noMemory(r);
     if(!Vault::validate(doc.as<JsonVariantConst>()))return result(r,400,"Invalid data or size limit");
+    input.clear();
+    if(!Vault::validate(doc.as<JsonVariantConst>()))return result(r,500,"Record copy failed");
     return Vault::save(doc)?result(r,200,"Saved"):operation(r,Vault::lastResult(),"");
   }
   return result(r,404,"Not found");

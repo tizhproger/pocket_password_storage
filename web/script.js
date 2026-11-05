@@ -82,7 +82,7 @@ const PPS = (() => {
 if(typeof module!=='undefined')module.exports=PPS;
 if(typeof document!=='undefined'){
   const $=id=>document.getElementById(id);
-  let token='',records={schema:2,entries:[]},revision='',status={},editId='',editRevision='',networkRevision='',pendingImport=null,encryptedImport=null,importRevision='',restoreRevision='',busy=false,lastActivity=0,lastTouch=0;
+  let token='',records={schema:2,entries:[]},revision='',vaultReady=false,status={},editId='',editRevision='',networkRevision='',pendingImport=null,encryptedImport=null,importRevision='',restoreRevision='',busy=false,lastActivity=0,lastTouch=0;
   const revealTimers=new Set(),extraReaders=new WeakMap();
   let searchTimer=null;
   let originalTags=null,originalEntry=null,originalInputs={},phraseTarget=null,phraseSize=24;
@@ -134,7 +134,7 @@ if(typeof document!=='undefined'){
   }
   function clearClient(){
     if(searchTimer!==null){clearTimeout(searchTimer);searchTimer=null;}
-    mask();hideEditorSecrets();token='';records={schema:2,entries:[]};revision='';editId='';pendingImport=null;encryptedImport=null;originalTags=null;originalEntry=null;originalInputs={};phraseTarget=null;
+    mask();hideEditorSecrets();token='';records={schema:2,entries:[]};revision='';vaultReady=false;editId='';pendingImport=null;encryptedImport=null;originalTags=null;originalEntry=null;originalInputs={};phraseTarget=null;
     $('records').replaceChildren();
     document.querySelectorAll('dialog').forEach(d=>d.close());document.querySelectorAll('form').forEach(f=>f.reset());
     $('extras').replaceChildren();$('phraseWords').replaceChildren();$('search').value='';$('searchMatch').value='partial';
@@ -143,7 +143,23 @@ if(typeof document!=='undefined'){
   }
   function updateAuth(){const setup=['empty','legacy'].includes(status.state);$('codeLabel').hidden=!setup;$('confirmationLabel').hidden=status.state!=='empty';$('authTitle').textContent=setup?(status.state==='legacy'?'Migrate legacy vault':'Initial setup'):'Login';$('authSubmit').textContent=setup?'Confirm setup':'Log in';$('authHelp').textContent=setup?'Press SELECT on the device, set and confirm a new PIN. Enter the displayed code and your '+(status.state==='legacy'?'old master password.':'new master password (at least 12 bytes).'):['corrupt','fs_error'].includes(status.state)?'Vault error. Use physical recovery on the device; do not create a new vault over the old one.':'Enter your master password to access the records.';$('authSubmit').disabled=['corrupt','fs_error'].includes(status.state);$('connection').textContent='Device · '+(status.version||'PPS');}
   async function check(){status=(await api('status')).body;updateAuth();}
-  async function refresh(){const r=await api('records');PPS.validate(r.body);records=r.body;revision=r.response.headers.get('X-Vault-Revision');if(!revision)throw new Error('Missing vault revision');render();}
+  function requireFreshList(){
+    if(!vaultReady||!revision)throw new Error('The record list is not current. Use Refresh before making changes or exporting a backup.');
+  }
+  function invalidateList(){
+    vaultReady=false;revision='';records={schema:2,entries:[]};mask();
+    $('records').replaceChildren(element('p','Records are unavailable. Use Refresh to load the current list.'));
+    $('count').textContent='List unavailable — use Refresh';
+  }
+  async function refresh(){
+    try{
+      const r=await api('records');
+      PPS.validate(r.body);
+      const nextRevision=r.response.headers.get('X-Vault-Revision');
+      if(!nextRevision)throw new Error('Missing vault revision');
+      records=r.body;revision=nextRevision;vaultReady=true;render();
+    }catch(error){invalidateList();throw error;}
+  }
   function element(tag,text,cls){const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;}
   function action(text,fn,cls='secondary'){const b=element('button',text,cls);b.type='button';b.addEventListener('click',()=>run(fn));return b;}
   function syncTagFilter(){
@@ -179,8 +195,11 @@ if(typeof document!=='undefined'){
         mask();for(const {text,value} of secrets)text.textContent=value===''?'—':value;
         const t=setTimeout(()=>{for(const {text,value} of secrets)text.textContent=value===''?'—':'••••••••';revealTimers.delete(t);},10000);revealTimers.add(t);
       }),action('Edit',()=>openEditor(e)),action('Delete',async()=>{
+        requireFreshList();
         if(!confirm('Delete record “'+e.site+'”?'))return;
-        await api('delete',{id:e.id,revision});await refresh();
+        await api('delete',{id:e.id,revision});
+        try{await refresh();notice('Record deleted');}
+        catch(error){notice('Record deleted, but list refresh failed. Use Refresh to check the list: '+error.message);}
       },'danger'));
       card.append(actions);$('records').append(card);
     }
@@ -217,6 +236,7 @@ if(typeof document!=='undefined'){
     row.append(nameLabel,valueLabel,bytes,buttons);$('extras').append(row);updateFieldCount();return row;
   }
   function openEditor(e){
+    requireFreshList();
     if(!e&&records.entries.length>=PPS.limits.maxEntries)throw new Error('Limit reached: '+PPS.limits.maxEntries+' records');
     mask();editId=e?.id||'';editRevision=revision;originalTags=e?PPS.tagMetadata(e):null;originalEntry=e||null;
     $('entryForm').reset();$('extras').replaceChildren();showPassword(false);$('editorTitle').textContent=e?'Edit record':'New record';
@@ -261,7 +281,7 @@ if(typeof document!=='undefined'){
   }
   function updateBackToTop(){$('backToTop').hidden=$('vault').hidden||window.scrollY<400;}
   function download(data,name){const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'})),a=element('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-  function previewImport(data){const legacy=Array.isArray(data);PPS.validate(data,legacy);pendingImport={data,legacy};importRevision=revision;$('importSummary').textContent='Records in file: '+(legacy?data.length:data.entries.length)+'. Currently on device: '+records.entries.length+'.';$('importDialog').showModal();}
+  function previewImport(data){requireFreshList();const legacy=Array.isArray(data);PPS.validate(data,legacy);pendingImport={data,legacy};importRevision=revision;$('importSummary').textContent='Records in file: '+(legacy?data.length:data.entries.length)+'. Currently on device: '+records.entries.length+'.';$('importDialog').showModal();}
   document.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click',()=>$(b.dataset.close).close()));
   document.querySelectorAll('dialog').forEach(d=>d.addEventListener('close',()=>{
     d.querySelectorAll('form').forEach(f=>f.reset());d.querySelectorAll('input,textarea').forEach(i=>{if(i.type!=='checkbox')i.value='';});
@@ -313,7 +333,13 @@ if(typeof document!=='undefined'){
     }
     authProgress('Verifying master password… Do not close this page.','Logging in…');
     token=(await api('login',{password})).body.token;lastActivity=Date.now();lastTouch=0;
-    authProgress('Loading records…','Loading…');await refresh();$('auth').hidden=true;$('vault').hidden=false;updateBackToTop();
+    $('auth').hidden=true;$('vault').hidden=false;updateBackToTop();
+    authProgress('Loading records…','Loading…');
+    try{await refresh();}
+    catch(error){
+      $('count').textContent='Record list unavailable. Use Refresh to try loading it again.';
+      notice('Signed in, but the record list could not be loaded: '+error.message);
+    }
   });};
   $('add').onclick=()=>run(()=>openEditor());$('refresh').onclick=()=>run(refresh);
   $('extraAdd').onclick=()=>run(()=>{
@@ -324,6 +350,7 @@ if(typeof document!=='undefined'){
   });
   $('generate').onclick=()=>run(()=>{$('password').value=PPS.generatePassword();notice('A new random password has been generated. Save the record.');});
   $('entryForm').onsubmit=e=>{e.preventDefault();run(async()=>{
+    requireFreshList();
     const extras=[...$('extras').children].map(row=>extraReaders.get(row)());
     const names=new Set();
     for(const extra of extras){
@@ -339,18 +366,22 @@ if(typeof document!=='undefined'){
     if(PPS.byteLength(JSON.stringify({schema:2,entries}))>PPS.limits.vaultBytes)throw new Error('Storage exceeds '+(PPS.limits.vaultBytes/1024)+' KiB. Shorten the record or free space before saving.');
     if(editId)entry.id=editId;
     await api(editId?'edit':'add',editId?{revision:editRevision,id:editId,entry}:{revision:editRevision,entry});
-    $('editor').close();await refresh();notice('Record saved');
+    $('editor').close();
+    try{await refresh();notice('Record saved');}
+    catch(error){notice('Record saved, but list refresh failed. Use Refresh and verify the entry: '+error.message);}
   });};
-  $('backup').onclick=()=>run(()=>{$('backupForm').reset();$('backupDialog').showModal();});
-  $('backupForm').onsubmit=e=>{e.preventDefault();run(async()=>{if($('backupPassword').value!==$('backupConfirm').value)throw new Error('Backup passwords do not match');const p=$('backupPassword').value;$('backupForm').reset();const copy=await PPS.encryptBackup(records,p);download(copy,'pps-backup-encrypted.json');$('backupDialog').close();notice('Encrypted backup is ready');});};
-  $('plainExport').onclick=()=>run(()=>{if(confirm('The file will contain all passwords in plain text. Download it?')){download(records,'pps-backup-UNENCRYPTED.json');$('backupDialog').close();}});
+  $('backup').onclick=()=>run(()=>{requireFreshList();$('backupForm').reset();$('backupDialog').showModal();});
+  $('backupForm').onsubmit=e=>{e.preventDefault();run(async()=>{requireFreshList();if($('backupPassword').value!==$('backupConfirm').value)throw new Error('Backup passwords do not match');const p=$('backupPassword').value;$('backupForm').reset();const copy=await PPS.encryptBackup(records,p);download(copy,'pps-backup-encrypted.json');$('backupDialog').close();notice('Encrypted backup is ready');});};
+  $('plainExport').onclick=()=>run(()=>{requireFreshList();if(confirm('The file will contain all passwords in plain text. Download it?')){download(records,'pps-backup-UNENCRYPTED.json');$('backupDialog').close();}});
   $('importFile').onchange=()=>{const file=$('importFile').files[0];$('importFile').value='';if(!file)return;run(async()=>{if(file.size>131072)throw new Error('File exceeds 128 KiB');const data=JSON.parse(await file.text());if(data?.format==='pps-backup'){encryptedImport=data;$('decryptForm').reset();$('decryptDialog').showModal();}else previewImport(data);});};
   $('decryptForm').onsubmit=e=>{e.preventDefault();run(async()=>{const password=$('decryptPassword').value;$('decryptPassword').value='';const data=await PPS.decryptBackup(encryptedImport,password);$('decryptDialog').close();previewImport(data);});};
-  $('confirmImport').onclick=()=>run(async()=>{if(!pendingImport)throw new Error('Select the file again');await api('import',{revision:importRevision,...pendingImport,confirm_replace:true});$('importDialog').close();await refresh();notice('Records replaced. The previous snapshot is available until the next write attempt. Save an external backup.');});
-  $('restore').onclick=()=>run(()=>{restoreRevision=revision;$('restoreForm').reset();$('restoreDialog').showModal();});
+  $('confirmImport').onclick=()=>run(async()=>{requireFreshList();if(!pendingImport)throw new Error('Select the file again');await api('import',{revision:importRevision,...pendingImport,confirm_replace:true});$('importDialog').close();
+    try{await refresh();notice('Records replaced. The previous snapshot is available until the next write attempt. Save an external backup.');}
+    catch(error){notice('Import saved, but list refresh failed. Use Refresh to verify. The previous snapshot is available until the next write attempt: '+error.message);}});
+  $('restore').onclick=()=>run(()=>{requireFreshList();restoreRevision=revision;$('restoreForm').reset();$('restoreDialog').showModal();});
   $('restoreForm').onsubmit=e=>{e.preventDefault();run(async()=>{const password=$('restorePassword').value;$('restorePassword').value='';await api('restore',{revision:restoreRevision,password,confirm_replace:true});clearClient();notice('Previous records restored. Your master password and PIN were preserved; log in again.');});};
   $('settings').onclick=()=>run(async()=>{const s=(await api('settings')).body;networkRevision=s.revision;$('networkForm').reset();$('ssid').value=s.ssid;$('apSsid').value=s.ap_ssid;$('wifiMode').value=s.wifi_mode;$('openWifi').checked=!s.has_password;$('networkWarning').textContent=s.warning||'';$('settingsDialog').showModal();});
-  $('diagnostics').onclick=()=>run(async()=>{const d=(await api('diagnostics')).body;const kib=n=>Number.isFinite(n)?(n/1024).toFixed(1)+' KiB':'unavailable';$('diagnosticsResult').textContent=['Firmware: '+d.firmware,'Free RAM: '+kib(d.heap_free),'Minimum RAM since startup: '+kib(d.heap_min),'Largest free block: '+kib(d.heap_largest_block),'Allocation failures: '+d.allocation_failures,'Limit: '+d.max_entries+' records, '+kib(d.vault_max_bytes),'Vault read: '+(d.vault_read_last_ms??'—')+' ms last, '+(d.vault_read_peak_ms??'—')+' ms max','Arduino-ESP32: '+(d.arduino_core||'—')+'; ESP-IDF: '+(d.esp_idf||'—'),'ArduinoJson: '+d.arduinojson+'; Mbed TLS: '+d.mbedtls,d.tls_sdk_review_required?'TLS SDK security updates need to be reviewed; see the firmware release notes.':''].filter(Boolean).join('\n');});
+  $('diagnostics').onclick=()=>run(async()=>{const d=(await api('diagnostics')).body;const kib=n=>Number.isFinite(n)?(n/1024).toFixed(1)+' KiB':'unavailable';$('diagnosticsResult').textContent=['Firmware: '+d.firmware,'Free RAM: '+kib(d.heap_free),'Minimum RAM since startup: '+kib(d.heap_min),'Largest free block: '+kib(d.heap_largest_block),'Allocation failures: '+d.allocation_failures,'  Heap reserve: '+(d.heap_reserve_failures??'—')+'; largest block: '+(d.largest_block_failures??'—'),'  JSON budget: '+(d.json_budget_failures??'—')+'; malloc: '+(d.malloc_failures??'—')+'; other: '+(d.other_allocation_failures??'—'),'  Last failed allocation: '+(d.last_failed_allocation_bytes??'—')+' bytes ('+(d.last_allocation_failure_reason??'—')+')','Limit: '+d.max_entries+' records, '+kib(d.vault_max_bytes),'Vault read: '+(d.vault_read_last_ms??'—')+' ms last, '+(d.vault_read_peak_ms??'—')+' ms max','Arduino-ESP32: '+(d.arduino_core||'—')+'; ESP-IDF: '+(d.esp_idf||'—'),'ArduinoJson: '+d.arduinojson+'; Mbed TLS: '+d.mbedtls,d.tls_sdk_review_required?'TLS SDK security updates need to be reviewed; see the firmware release notes.':''].filter(Boolean).join('\n');});
   $('networkForm').onsubmit=e=>{e.preventDefault();run(async()=>{await api('settings',{revision:networkRevision,ssid:$('ssid').value,password:$('wifiPassword').value,ap_ssid:$('apSsid').value,ap_password:$('apPassword').value,wifi_mode:$('wifiMode').value,open_wifi:$('openWifi').checked});networkRevision=(await api('settings')).body.revision;$('wifiPassword').value='';$('apPassword').value='';notice('Settings saved. Click “Apply” to reconnect.');});};
   $('wifiPassword').addEventListener('input',()=>{if($('wifiPassword').value)$('openWifi').checked=false;});
   $('openWifi').addEventListener('change',()=>{if($('openWifi').checked)$('wifiPassword').value='';});

@@ -10,8 +10,34 @@
 #include <esp_heap_caps.h>
 #endif
 namespace PpsMemory {
+enum class FailureReason : uint8_t { None=0, Other=1, HeapReserve=2, LargestBlock=3, JsonBudget=4, Malloc=5 };
 inline std::atomic<uint32_t> failures{0};
-inline void failed(){failures.fetch_add(1,std::memory_order_relaxed);}
+inline std::atomic<uint32_t> heapReserveFailures{0},largestBlockFailures{0};
+inline std::atomic<uint32_t> jsonBudgetFailures{0},mallocFailures{0},otherFailures{0};
+inline std::atomic<size_t> lastFailedAllocationBytes{0};
+inline std::atomic<uint8_t> lastFailureReason{0};
+inline const char* reasonName(FailureReason reason){
+  switch(reason){
+    case FailureReason::None:return "none";
+    case FailureReason::HeapReserve:return "heap_reserve";
+    case FailureReason::LargestBlock:return "largest_block";
+    case FailureReason::JsonBudget:return "json_budget";
+    case FailureReason::Malloc:return "malloc";
+    default:return "other";
+  }
+}
+inline void failed(FailureReason reason=FailureReason::Other,size_t bytes=0){
+  switch(reason){
+    case FailureReason::HeapReserve:heapReserveFailures.fetch_add(1,std::memory_order_relaxed);break;
+    case FailureReason::LargestBlock:largestBlockFailures.fetch_add(1,std::memory_order_relaxed);break;
+    case FailureReason::JsonBudget:jsonBudgetFailures.fetch_add(1,std::memory_order_relaxed);break;
+    case FailureReason::Malloc:mallocFailures.fetch_add(1,std::memory_order_relaxed);break;
+    default:otherFailures.fetch_add(1,std::memory_order_relaxed);break;
+  }
+  lastFailedAllocationBytes.store(bytes,std::memory_order_relaxed);
+  lastFailureReason.store(static_cast<uint8_t>(reason),std::memory_order_relaxed);
+  failures.fetch_add(1,std::memory_order_relaxed);
+}
 struct Attempt {uint32_t start=failures.load(std::memory_order_relaxed);bool failed()const{return start!=failures.load(std::memory_order_relaxed);}};
 #ifdef PPS_MEMORY_TEST
 inline void* (*allocateHook)(size_t)=std::malloc;
@@ -22,14 +48,16 @@ inline void* allocate(size_t n){
 
   constexpr size_t reserve=16384;
   size_t available=heap_caps_get_free_size(MALLOC_CAP_8BIT);
-  if(n>available||available-n<reserve||heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)<n){failed();return nullptr;}
+  if(n>available||available-n<reserve){failed(FailureReason::HeapReserve,n);return nullptr;}
+  if(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)<n){failed(FailureReason::LargestBlock,n);return nullptr;}
 #endif
 #ifdef PPS_MEMORY_TEST
   void* p=allocateHook(n);
 #else
   void* p=std::malloc(n);
 #endif
-  if(!p)failed();return p;
+  if(!p)failed(FailureReason::Malloc,n);
+  return p;
 }
 inline void release(void* p){
 #ifdef PPS_MEMORY_TEST
@@ -58,7 +86,8 @@ class Bytes {
   bool resize(size_t n){
     if(n<=capacity_){if(n<size_)mbedtls_platform_zeroize(data()+n,size_-n);else if(n>size_)memset(data()+size_,0,n-size_);size_=n;valid_=true;return true;}
     auto next=static_cast<uint8_t*>(PpsMemory::allocate(n));if(!next){valid_=false;return false;}
-    if(size_)memcpy(next,data(),size_);memset(next+size_,0,n-size_);
+    if(size_)memcpy(next,data(),size_);
+    memset(next+size_,0,n-size_);
     if(p_){mbedtls_platform_zeroize(p_,capacity_);PpsMemory::release(p_);}p_=next;size_=capacity_=n;valid_=true;return true;
   }
   bool assign(size_t n,uint8_t value){if(!resize(n))return false;if(n)memset(data(),value,n);return true;}
