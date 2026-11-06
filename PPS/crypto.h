@@ -19,6 +19,7 @@ String token(size_t n=32);
 bool derive(const String&,const uint8_t*,size_t,uint32_t,uint8_t*,size_t);
 bool sealInto(const uint8_t*,int,const uint8_t*,size_t,const void*,size_t,const uint8_t*,size_t,uint8_t*,uint8_t[16]);
 bool seal(const uint8_t*,int,const uint8_t*,size_t,const void*,size_t,const uint8_t*,size_t,Bytes&,uint8_t[16]);
+bool openInto(const uint8_t*,int,const uint8_t*,size_t,const void*,size_t,const uint8_t*,size_t,uint8_t*,const uint8_t[16]);
 bool open(const uint8_t*,int,const uint8_t*,size_t,const void*,size_t,const uint8_t*,size_t,Bytes&,const uint8_t[16]);
 }
 

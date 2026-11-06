@@ -182,7 +182,7 @@ if(typeof document!=='undefined'){
     $('count').textContent=visible.length+' shown · '+records.entries.length+' / '+PPS.limits.maxEntries+' records (safety cap) · '+
       (space.usedBytes/1024).toFixed(1)+' / '+(PPS.limits.vaultBytes/1024)+' KiB · '+
       (space.remainingBytes/1024).toFixed(1)+' KiB free'+
-      (space.estimatedAdditional===null?'':' · ~'+space.estimatedAdditional+' more at current average size (estimate; RAM may limit)');
+      (space.estimatedAdditional===null?'':' · ~'+space.estimatedAdditional+' (estimate)');
     if(!visible.length)$('records').append(element('p',records.entries.length?'No matching records. Change or clear the filters.':'No records yet. Add your first record.'));
     for(const e of visible){
       const card=element('article'),secrets=[],meta=PPS.tagMetadata(e);card.dataset.id=e.id;

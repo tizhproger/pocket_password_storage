@@ -6,6 +6,8 @@
 #include <Preferences.h>
 #include <climits>
 #include <cstddef>
+#include <mbedtls/sha256.h>
+#include <mbedtls/version.h>
 namespace Vault {
 #pragma pack(push,1)
 struct WrappedKey {uint8_t iv[12],cipher[32],tag[16];};
@@ -105,7 +107,46 @@ static bool loadRef(const Journal::Ref& r,Bytes& b,Header* out=nullptr){
 }
 struct DiskIO {
   bool writeSlot(uint32_t slot,const uint8_t* p,size_t n){auto f=SPIFFS.open(slotPath(slot),"w");if(!f)return false;bool ok=f.write(p,n)==n;f.flush();f.close();return ok;}
-  bool verifySlot(const Journal::Ref& r){Bytes b;return loadRef(r,b);}
+  bool verifySlot(const Journal::Ref& r){
+    if(r.slot>1||r.length<sizeof(Header)||r.length>sizeof(Header)+Config::VAULT_MAX)return false;
+    File f=SPIFFS.open(slotPath(r.slot),"r");
+    if(!f||f.size()!=r.length){if(f)f.close();return false;}
+    Header h{};
+    if(f.read(reinterpret_cast<uint8_t*>(&h),sizeof(h))!=sizeof(h)||
+       memcmp(h.magic,"PPS2VAUL",8)||
+       (h.version!=2&&h.version!=3)||
+       h.generation!=r.generation||!h.length||
+       h.length!=r.length-sizeof(h)){f.close();return false;}
+    mbedtls_sha256_context ctx;mbedtls_sha256_init(&ctx);
+#if MBEDTLS_VERSION_MAJOR >= 3
+    int rc=mbedtls_sha256_starts(&ctx,0);
+    if(!rc)rc=mbedtls_sha256_update(&ctx,reinterpret_cast<const uint8_t*>(&h),sizeof(h));
+#else
+    int rc=mbedtls_sha256_starts_ret(&ctx,0);
+    if(!rc)rc=mbedtls_sha256_update_ret(&ctx,reinterpret_cast<const uint8_t*>(&h),sizeof(h));
+#endif
+    uint8_t scratch[512]{};size_t remaining=h.length;
+    while(!rc&&remaining){
+      const size_t want=remaining<sizeof(scratch)?remaining:sizeof(scratch);
+      const size_t got=f.read(scratch,want);
+      if(got!=want){rc=-1;break;}
+#if MBEDTLS_VERSION_MAJOR >= 3
+      rc=mbedtls_sha256_update(&ctx,scratch,got);
+#else
+      rc=mbedtls_sha256_update_ret(&ctx,scratch,got);
+#endif
+      remaining-=got;
+    }
+    Secret<32> checksum;
+#if MBEDTLS_VERSION_MAJOR >= 3
+    if(!rc)rc=mbedtls_sha256_finish(&ctx,checksum.data);
+#else
+    if(!rc)rc=mbedtls_sha256_finish_ret(&ctx,checksum.data);
+#endif
+    mbedtls_sha256_free(&ctx);
+    wipe(scratch,sizeof(scratch));f.close();
+    return !rc&&!remaining&&Crypto::equal(checksum.data,r.digest,32);
+  }
   bool writeHead(const Journal::Head& h){return meta.putBytes("head",&h,sizeof(h))==sizeof(h);}
   bool readHead(Journal::Head& h){return meta.getBytesLength("head")==sizeof(h)&&meta.getBytes("head",&h,sizeof(h))==sizeof(h);}
 };
@@ -153,11 +194,12 @@ static bool unwrap(const String& password,const Header& h,bool pin,uint8_t* key)
   if(!Crypto::derive(password,salt,16,Config::KDF_ROUNDS,kek.data,32)||!Crypto::open(kek.data,256,w.iv,12,aad.data,17,w.cipher,32,plain,w.tag))return false;
   memcpy(key,plain.data(),32);return true;
 }
-static bool decode(const Bytes& b,const Header& h,const uint8_t* key,SecureJson& doc){
+static bool decode(Bytes& b,const Header& h,const uint8_t* key,SecureJson& doc){
   Secret<32> payloadKey;
   if(h.version==3){if(!Crypto::subkey(key,"PPS v3 payload",payloadKey.data))return false;}else memcpy(payloadKey.data,key,32);
-  Bytes plain;if(!Crypto::open(payloadKey.data,256,h.iv,12,&h,offsetof(Header,tag),b.data()+sizeof(h),h.length,plain,h.tag))return false;
-  return deserializeChecked(doc,plain.data(),plain.size())&&validate(doc.as<JsonVariantConst>());
+  uint8_t* payload=b.data()+sizeof(h);
+  if(!Crypto::openInto(payloadKey.data,256,h.iv,12,&h,offsetof(Header,tag),payload,h.length,payload,h.tag))return false;
+  return deserializeChecked(doc,payload,h.length)&&validate(doc.as<JsonVariantConst>());
 }
 bool begin(){
   PpsMemory::Attempt memory;last=Outcome::Ok;
@@ -197,20 +239,38 @@ static bool commit(JsonVariantConst doc,Header next,const uint8_t* key){
     if(head.current.generation==UINT32_MAX)return failure(Outcome::Storage);
     Bytes current;if(!loadRef(head.current,current))return readFailure(memory);
   }
-  Bytes plain;Secret<32> payloadKey,expected,actual;
-  if(!serializeVariantChecked(doc,plain,Config::VAULT_MAX)||!Crypto::hash(plain.data(),plain.size()-1,expected.data)||!Crypto::subkey(key,"PPS v3 payload",payloadKey.data))return failure(memory.failed()?Outcome::NoMemory:Outcome::Storage);
-  size_t n=plain.size()-1;next.version=3;next.generation=hadHead?head.current.generation+1:1;next.length=n;
-  Bytes blob(sizeof(next)+n);if(!blob.valid())return failure(Outcome::NoMemory);
-  if(!nextNonce(next,next.iv)||!Crypto::sealInto(payloadKey.data,256,next.iv,12,&next,offsetof(Header,tag),plain.data(),n,blob.data()+sizeof(next),next.tag))return failure(memory.failed()?Outcome::NoMemory:Outcome::Storage);
+  const size_t n=measureJson(doc);
+  if(!n||n>Config::VAULT_MAX)return failure(Outcome::Invalid);
+  Bytes blob(sizeof(Header)+n+1);
+  if(!blob.valid())return failure(Outcome::NoMemory);
+  uint8_t* payload=blob.data()+sizeof(Header);
+  if(serializeJson(doc,reinterpret_cast<char*>(payload),n+1)!=n)
+    return failure(memory.failed()?Outcome::NoMemory:Outcome::Storage);
+  if(!blob.resize(sizeof(Header)+n))return failure(Outcome::NoMemory);
+  Secret<32> expected,actual,payloadKey;
+  Secret<16> checkTag;
+  if(!Crypto::hash(payload,n,expected.data)||!Crypto::subkey(key,"PPS v3 payload",payloadKey.data))
+    return failure(memory.failed()?Outcome::NoMemory:Outcome::Storage);
+  next.version=3;next.generation=hadHead?head.current.generation+1:1;next.length=n;
+  if(!nextNonce(next,next.iv)||
+     !Crypto::sealInto(payloadKey.data,256,next.iv,12,&next,offsetof(Header,tag),payload,n,payload,next.tag))
+    return failure(memory.failed()?Outcome::NoMemory:Outcome::Storage);
+  if(!Crypto::openInto(payloadKey.data,256,next.iv,12,&next,offsetof(Header,tag),payload,n,payload,next.tag)||
+     !Crypto::hash(payload,n,actual.data)||!Crypto::equal(actual.data,expected.data,32)||
+     !Crypto::sealInto(payloadKey.data,256,next.iv,12,&next,offsetof(Header,tag),payload,n,payload,checkTag.data)||
+     !Crypto::equal(checkTag.data,next.tag,16))
+    return failure(memory.failed()?Outcome::NoMemory:Outcome::Storage);
   memcpy(blob.data(),&next,sizeof(next));
-  if(!Crypto::open(payloadKey.data,256,next.iv,12,&next,offsetof(Header,tag),blob.data()+sizeof(next),n,plain,next.tag)||!Crypto::hash(plain.data(),plain.size(),actual.data)||!Crypto::equal(actual.data,expected.data,32))return failure(memory.failed()?Outcome::NoMemory:Outcome::Storage);
-  plain.clear();Journal::Ref ref{};ref.slot=hadHead?1-head.current.slot:0;ref.generation=next.generation;ref.length=blob.size();
-  if(!Crypto::hash(blob.data(),blob.size(),ref.digest))return failure(memory.failed()?Outcome::NoMemory:Outcome::Storage);
+  Journal::Ref ref{};ref.slot=hadHead?1-head.current.slot:0;
+  ref.generation=next.generation;ref.length=blob.size();
+  if(!Crypto::hash(blob.data(),blob.size(),ref.digest))
+    return failure(memory.failed()?Outcome::NoMemory:Outcome::Storage);
   DiskIO io;Journal::Head committed{};
   if(!Journal::publish(io,blob.data(),blob.size(),ref,head,committed)){
     Journal::Head observed{};
     if(memory.failed()&&!hadHead&&!meta.isKey("head")){
-      if(SPIFFS.exists(slotPath(ref.slot))&&!SPIFFS.remove(slotPath(ref.slot)))return damaged();return failure(Outcome::NoMemory);
+      if(SPIFFS.exists(slotPath(ref.slot))&&!SPIFFS.remove(slotPath(ref.slot)))return damaged();
+      return failure(Outcome::NoMemory);
     }
     if(!io.readHead(observed)||memcmp(&observed,&head,sizeof(head)))return damaged();
     return failure(memory.failed()?Outcome::NoMemory:Outcome::Storage);
@@ -313,17 +373,16 @@ bool recoverPrevious(const String& pin){
       if(!structure(candidate,candidateHeader)||
          (found&&candidateHeader.generation<=selected.generation))continue;
       Secret<32> key;SecureJson verified(Config::JSON_CAPACITY);
-      if(!unwrap(pin,candidateHeader,true,key.data)||
-         !decode(candidate,candidateHeader,key.data,verified)){
-        // Never treat an allocation failure as a wrong PIN or corrupt slot.
-        if(memory.failed())return failure(Outcome::NoMemory);
-        continue;
-      }
       Journal::Ref ref{};ref.slot=slot;
       ref.generation=candidateHeader.generation;
       ref.length=candidate.size();
       if(!Crypto::hash(candidate.data(),candidate.size(),ref.digest))
         return failure(memory.failed()?Outcome::NoMemory:Outcome::Storage);
+      if(!unwrap(pin,candidateHeader,true,key.data)||
+         !decode(candidate,candidateHeader,key.data,verified)){
+        if(memory.failed())return failure(Outcome::NoMemory);
+        continue;
+      }
       selected=ref;selectedHeader=candidateHeader;found=true;
     }
   }

@@ -77,6 +77,14 @@ bool seal(const uint8_t* key,int bits,const uint8_t* iv,size_t ivlen,const void*
   if(!out.resize(n))return false;
   if(!sealInto(key,bits,iv,ivlen,aad,an,in,n,out.data(),tag)){out.clear();return false;}return true;
 }
+bool openInto(const uint8_t* key,int bits,const uint8_t* iv,size_t ivlen,const void* aad,size_t an,const uint8_t* in,size_t n,uint8_t* out,const uint8_t tag[16]){
+  mbedtls_gcm_context c;mbedtls_gcm_init(&c);
+  int rc=mbedtls_gcm_setkey(&c,MBEDTLS_CIPHER_ID_AES,key,bits);
+  if(!rc)rc=mbedtls_gcm_auth_decrypt(&c,n,iv,ivlen,static_cast<const uint8_t*>(aad),an,tag,16,in,out);
+  mbedtls_gcm_free(&c);
+  if(rc)wipe(out,n);
+  return result(rc);
+}
 bool open(const uint8_t* key,int bits,const uint8_t* iv,size_t ivlen,const void* aad,size_t an,const uint8_t* in,size_t n,Bytes& out,const uint8_t tag[16]){
   if(!out.resize(n))return false;
   mbedtls_gcm_context c;mbedtls_gcm_init(&c);int rc=mbedtls_gcm_setkey(&c,MBEDTLS_CIPHER_ID_AES,key,bits);
