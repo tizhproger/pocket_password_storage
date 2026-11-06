@@ -18,6 +18,7 @@
 #endif
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <atomic>
 namespace Web {
 static Bytes certificate,privateKey;
 static String certFingerprint;
@@ -26,6 +27,29 @@ struct Job {httpd_req_t* request;SemaphoreHandle_t done;esp_err_t result;};
 static Job* pending=nullptr;
 static bool accepting=false;
 static portMUX_TYPE mux=portMUX_INITIALIZER_UNLOCKED;
+static std::atomic<const char*> lastMemoryStage{"none"};
+static std::atomic<const char*> lastMemorySavePhase{"none"};
+static std::atomic<uint32_t> lastMemoryFailureCount{0};
+static char bootMarker[9]="00000000";
+#ifdef ARDUINO_ARCH_ESP32
+static const char* resetReasonName(){
+  switch(esp_reset_reason()){
+    case ESP_RST_POWERON:return "power_on";
+    case ESP_RST_EXT:return "external_reset";
+    case ESP_RST_SW:return "software_reset";
+    case ESP_RST_PANIC:return "panic";
+    case ESP_RST_INT_WDT:return "interrupt_watchdog";
+    case ESP_RST_TASK_WDT:return "task_watchdog";
+    case ESP_RST_WDT:return "watchdog";
+    case ESP_RST_DEEPSLEEP:return "deep_sleep";
+    case ESP_RST_BROWNOUT:return "brownout";
+    default:return "other";
+  }
+}
+#endif
+#ifdef ARDUINO_ARCH_ESP32
+static std::atomic<size_t> lastMemoryFreeBytes{0},lastMemoryLargestBytes{0};
+#endif
 static bool identity(){
   Preferences p;if(!p.begin("ppstls",false))return false;
   if(p.isKey("identity")){
@@ -64,7 +88,12 @@ static bool identity(){
   mbedtls_pk_free(&key);mbedtls_x509_crt_free(&crt);Secret<32> digest;
   if(!ok||!Crypto::hash(certificate.data(),certificate.size(),digest.data))return false;certFingerprint=Crypto::hex(digest.data,32);return certFingerprint.length()==64;
 }
-bool begin(){if(identity())return true;certificate.clear();privateKey.clear();wipe(certFingerprint);return false;}
+bool begin(){
+#ifdef ARDUINO_ARCH_ESP32
+  snprintf(bootMarker,sizeof(bootMarker),"%08lx",static_cast<unsigned long>(esp_random()));
+#endif
+  if(identity())return true;certificate.clear();privateKey.clear();wipe(certFingerprint);return false;
+}
 String fingerprint(){return certFingerprint;}
 static String header(httpd_req_t* r,const char* name){
   size_t n=httpd_req_get_hdr_value_len(r,name);if(!n||n>1024)return String();Bytes b(n+1);if(!b.valid())return String();
@@ -78,7 +107,19 @@ static bool securityHeaders(httpd_req_t* r){
 }
 static const char* statusText(int code){switch(code){case 200:return "200 OK";case 400:return "400 Bad Request";case 401:return "401 Unauthorized";case 403:return "403 Forbidden";case 404:return "404 Not Found";case 409:return "409 Conflict";case 413:return "413 Payload Too Large";case 429:return "429 Too Many Requests";case 503:return "503 Service Unavailable";default:return "500 Internal Server Error";}}
 static esp_err_t send(httpd_req_t* r,int code,const char* type,const void* p,size_t n){if(httpd_resp_set_status(r,statusText(code))!=ESP_OK||httpd_resp_set_type(r,type)!=ESP_OK)return ESP_FAIL;return httpd_resp_send(r,static_cast<const char*>(p),n);}
-static esp_err_t noMemory(httpd_req_t* r){
+static esp_err_t noMemory(httpd_req_t* r,const char* stage="unclassified"){
+  lastMemoryStage.store(stage,std::memory_order_relaxed);
+  const bool savingStage=!strcmp(stage,"edit_commit")||!strcmp(stage,"import_commit");
+  const char* phase=savingStage?Vault::savePhase():"not_a_save";
+  lastMemorySavePhase.store(phase,std::memory_order_relaxed);
+  lastMemoryFailureCount.store(PpsMemory::failures.load(std::memory_order_relaxed),std::memory_order_relaxed);
+#ifdef ARDUINO_ARCH_ESP32
+  lastMemoryFreeBytes.store(heap_caps_get_free_size(MALLOC_CAP_8BIT),std::memory_order_relaxed);
+  lastMemoryLargestBytes.store(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),std::memory_order_relaxed);
+#endif
+  httpd_resp_set_hdr(r,"X-PPS-Memory-Stage",stage);
+  httpd_resp_set_hdr(r,"X-PPS-Save-Phase",phase);
+  httpd_resp_set_hdr(r,"X-PPS-Boot-Marker",bootMarker);
   static const char failure[]="{\"ok\":false,\"error\":\"memory_unavailable\",\"message\":\"Low memory; close other connections, reload and check the result before retrying\"}";
   return send(r,503,"application/json; charset=utf-8",failure,sizeof(failure)-1);
 }
@@ -182,7 +223,7 @@ static esp_err_t dispatch(httpd_req_t* r){
   size_t limit=publicPost||path=="/api/restore"?1536:simple?256:path=="/api/delete"?384:entry||path=="/api/import"?Config::REQUEST_MAX:2048;
   size_t budget=get?0:publicPost?4096:simple||path=="/api/delete"?2048:path=="/api/import"?Config::JSON_CAPACITY:entry?16384:6144;
   SecureJson input(budget);
-  if(!get){if(r->content_len>limit)return result(r,413,"Request too large");if(!body(r,input,limit))return memory.failed()?noMemory(r):result(r,400,"Invalid JSON request");}
+  if(!get){if(r->content_len>limit)return result(r,413,"Request too large");if(!body(r,input,limit))return memory.failed()?noMemory(r,"request_body"):result(r,400,"Invalid JSON request");}
   if(!get&&(path=="/api/login"||path=="/api/setup")){
     if(!(path=="/api/login"?fields(input.as<JsonVariantConst>(),{"password"}):fields(input.as<JsonVariantConst>(),{"password","code"}))||!textField(input["password"],128))return result(r,400,"Invalid password field");if(App::waitSeconds(false))return result(r,429,"Wait before retrying");
     SecretString password(input["password"].as<const char*>());if(memory.failed())return noMemory(r);
@@ -207,6 +248,23 @@ static esp_err_t dispatch(httpd_req_t* r){
     out["last_allocation_failure_reason"]=PpsMemory::reasonName(static_cast<PpsMemory::FailureReason>(PpsMemory::lastFailureReason.load(std::memory_order_relaxed)));
     out["vault_read_last_ms"]=Vault::readLastMillis();
     out["vault_read_peak_ms"]=Vault::readPeakMillis();
+    out["vault_read_json_alloc_bytes"]=Vault::readJsonAllocatedBytes();
+    out["vault_save_json_alloc_bytes"]=Vault::saveJsonAllocatedBytes();
+    out["vault_save_serialized_bytes"]=Vault::saveSerializedBytes();
+    out["vault_save_phase"]=Vault::savePhase();
+    out["boot_marker"]=bootMarker;
+    out["uptime_ms"]=millis();
+#ifdef ARDUINO_ARCH_ESP32
+    out["reset_reason_code"]=static_cast<int>(esp_reset_reason());
+    out["reset_reason"]=resetReasonName();
+#endif
+    out["last_memory_response_stage"]=lastMemoryStage.load(std::memory_order_relaxed);
+    out["last_memory_response_save_phase"]=lastMemorySavePhase.load(std::memory_order_relaxed);
+    out["last_memory_response_allocation_failures"]=lastMemoryFailureCount.load(std::memory_order_relaxed);
+#ifdef ARDUINO_ARCH_ESP32
+    out["last_memory_response_heap_free"]=lastMemoryFreeBytes.load(std::memory_order_relaxed);
+    out["last_memory_response_largest_block"]=lastMemoryLargestBytes.load(std::memory_order_relaxed);
+#endif
 #ifdef ARDUINO_ARCH_ESP32
     out["arduino_core"]=ESP_ARDUINO_VERSION_STR;out["esp_idf"]=esp_get_idf_version();out["heap_free"]=heap_caps_get_free_size(MALLOC_CAP_8BIT);out["heap_min"]=heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT);out["heap_largest_block"]=heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
 #endif
@@ -228,7 +286,7 @@ static esp_err_t dispatch(httpd_req_t* r){
     String currentRevision=Vault::revision();if(memory.failed())return noMemory(r);if(strcmp(input["revision"].as<const char*>(),currentRevision.c_str()))return operation(r,Outcome::Conflict,"");
     SecretString password(input["password"].as<const char*>());if(memory.failed())return noMemory(r);return operation(r,App::restorePrevious(password.value),"Previous data restored; all sessions locked");
   }
-  if(path=="/api/records"&&get){SecureJson out(Config::JSON_CAPACITY);if(!Vault::read(out))return operation(r,Vault::lastResult(),"");String rev=Vault::revision();if(memory.failed())return noMemory(r);if(httpd_resp_set_hdr(r,"X-Vault-Revision",rev.c_str())!=ESP_OK)return ESP_FAIL;return streamJson(r,out);}
+  if(path=="/api/records"&&get){SecureJson out(Config::JSON_CAPACITY);if(!Vault::read(out))return Vault::lastResult()==Outcome::NoMemory?noMemory(r,"records_read"):operation(r,Vault::lastResult(),"");String rev=Vault::revision();if(memory.failed())return noMemory(r);if(httpd_resp_set_hdr(r,"X-Vault-Revision",rev.c_str())!=ESP_OK)return ESP_FAIL;return streamJson(r,out);}
   if(!get&&(path=="/api/add"||path=="/api/edit"||path=="/api/delete"||path=="/api/import")){
     bool shape=path=="/api/import"?fields(input.as<JsonVariantConst>(),{"revision","data","legacy","confirm_replace"}):path=="/api/delete"?fields(input.as<JsonVariantConst>(),{"revision","id"}):path=="/api/add"?fields(input.as<JsonVariantConst>(),{"revision","entry"}):fields(input.as<JsonVariantConst>(),{"revision","id","entry"});
     if(!shape)return result(r,400,"Unexpected or missing fields");
@@ -241,9 +299,14 @@ static esp_err_t dispatch(httpd_req_t* r){
         if(!Vault::validate(input["data"]))return result(r,400,"Invalid import");JsonArray importedEntries=input["data"]["entries"].as<JsonArray>();
         for(auto e:importedEntries){String id=Crypto::token(16);if(id.length()!=32)return memory.failed()?noMemory(r):operation(r,Outcome::Unavailable,"");e["id"]=id;}
         if(input.overflowed())return noMemory(r);ok=Vault::save(input["data"].as<JsonVariantConst>());
-      }return ok?result(r,200,"Saved"):operation(r,Vault::lastResult(),"");
+      }
+      return ok?result(r,200,"Saved"):
+        Vault::lastResult()==Outcome::NoMemory?noMemory(r,"import_commit"):operation(r,Vault::lastResult(),"");
     }
-    SecureJson doc(Config::JSON_CAPACITY);if(!Vault::read(doc))return operation(r,Vault::lastResult(),"");auto entries=doc["entries"].as<JsonArray>();
+    Bytes scratch;
+    if(!Vault::reserveSaveScratch(scratch))return noMemory(r,"edit_scratch");
+    SecureJson doc(Config::JSON_CAPACITY);
+    if(!Vault::read(doc,scratch))return Vault::lastResult()==Outcome::NoMemory?noMemory(r,"edit_read"):operation(r,Vault::lastResult(),"");auto entries=doc["entries"].as<JsonArray>();
     if(path=="/api/add"){
       auto e=input["entry"].as<JsonObject>();if(e.isNull()||e.size()!=4||entries.size()>=Config::MAX_ENTRIES)return result(r,400,"Invalid entry or limit reached");
       String id=Crypto::token(16);if(id.length()!=32)return memory.failed()?noMemory(r):operation(r,Outcome::Unavailable,"");auto dest=jsonAddObject(entries);dest.set(e);dest["id"]=id;
@@ -253,31 +316,46 @@ static esp_err_t dispatch(httpd_req_t* r){
       if(index<0)return result(r,409,"Entry no longer exists");
       if(path=="/api/delete")entries.remove(index);else{if(!textField(input["entry"]["id"],32)||strcmp(input["entry"]["id"].as<const char*>(),input["id"].as<const char*>()))return result(r,400,"Entry id mismatch");entries[index].set(input["entry"]);}
     }
-    if(doc.overflowed())return noMemory(r);
+    if(doc.overflowed())return noMemory(r,"edit_json_overflow");
     if(!Vault::validate(doc.as<JsonVariantConst>()))return result(r,400,"Invalid data or size limit");
     input.clear();
     if(!Vault::validate(doc.as<JsonVariantConst>()))return result(r,500,"Record copy failed");
-    return Vault::save(doc)?result(r,200,"Saved"):operation(r,Vault::lastResult(),"");
+    const bool saved=Vault::save(doc,scratch);
+    const Outcome saveOutcome=Vault::lastResult();
+    scratch.clear();
+    doc.clear();
+    if(saved)return result(r,200,"Saved");
+    return saveOutcome==Outcome::NoMemory?noMemory(r,"edit_commit"):operation(r,saveOutcome,"");
   }
   return result(r,404,"Not found");
 }
 static esp_err_t enqueue(httpd_req_t* r){
+#if defined(configSUPPORT_STATIC_ALLOCATION) && (configSUPPORT_STATIC_ALLOCATION == 1)
+  StaticSemaphore_t semaphoreStorage{};
+  Job job{r,xSemaphoreCreateBinaryStatic(&semaphoreStorage),ESP_FAIL};
+#else
   Job job{r,xSemaphoreCreateBinary(),ESP_FAIL};
+#endif
   if(!job.done){
+    PpsMemory::failed(PpsMemory::FailureReason::Other);
     if(!securityHeaders(r))return ESP_FAIL;
-    return noMemory(r);
+    return noMemory(r,"job_semaphore");
   }
   portENTER_CRITICAL(&mux);
   bool queued=accepting&&!pending;
   if(queued)pending=&job;
   portEXIT_CRITICAL(&mux);
   if(!queued){
+#if !defined(configSUPPORT_STATIC_ALLOCATION) || (configSUPPORT_STATIC_ALLOCATION != 1)
     vSemaphoreDelete(job.done);
+#endif
     if(!securityHeaders(r))return ESP_FAIL;
     return result(r,503,"Device busy; retry the request","device_busy");
   }
   xSemaphoreTake(job.done,portMAX_DELAY);
+#if !defined(configSUPPORT_STATIC_ALLOCATION) || (configSUPPORT_STATIC_ALLOCATION != 1)
   vSemaphoreDelete(job.done);
+#endif
   return job.result;
 }
 bool start(){

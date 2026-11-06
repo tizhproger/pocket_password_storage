@@ -1,6 +1,6 @@
 # Pocket Password Storage (PPS)
 
-**Current firmware: `2.1.9`** · ESP32-C3 · local password vault · on-device PIN + HTTPS Web UI
+**Current firmware: `2.1.12`** · ESP32-C3 · local password vault · on-device PIN + HTTPS Web UI
 
 Pocket Password Storage is a small, locally operated password manager built around an ESP32 and a TFT display. Passwords are held in encrypted flash storage, accessed using the device's physical controls or over its local HTTPS interface. It does not require a cloud account or an Internet connection; Wi-Fi is used for local access.
 
@@ -102,13 +102,15 @@ Pocket Password Storage is a small, locally operated password manager built arou
 | **`2.1.6`** | Added read optimization, write-error protection, emergency restore. Removed uneccessary reads and improved stability. Added immediate failure upon an error when writing a log pointer (previously, such an error was only detected during a subsequent read). |
 | **`2.1.7`** | Extended limit to 256 records. Added dynamical limit calculation. |
 | **`2.1.8`** | Fixed bug with RAM usage spikes on startup and load by loading data 1KiB at a time. Added additional and detailed errors diagnostic in settings. Improved stability. |
-| **`2.1.9` (current)** | Fixed bug 'Not enough RAM' when saving records with multiple additional fields and login/pass. |
+| **`2.1.9`** | Fixed bug 'Not enough RAM' when saving records with multiple additional fields and login/pass. |
+| **`2.1.10`** and **`2.1.11`** | Extended diagnostics, fixing RAM bugs and peak-overflows during load/save/refresh. |
+| **`2.1.12` (current)** | Improved data loading stability. Fixed "Not enough RAM..." bug. Added possibilty to get fresh diagnostic data. |
 
 ### Alternative branch: `SoloVault` (initial version `0.1.0`)
 
 **SoloVault is a separate, from-scratch firmware architecture**, not another PPS 2.x update. Its initial `0.1.0` design carries over only the previously confirmed display/button pinout and ST7735 configuration; the PPS application sources, web client, authentication mechanisms, storage, backups and migration procedures are **not reused**.
 
-| Topic | PPS 2.1.9 | SoloVault 0.1.0 |
+| Topic | PPS 2.1.12 | SoloVault 0.1.0 |
 | --- | --- | --- |
 | Access | Local HTTPS Web UI and physical buttons | Physical buttons/display plus board-approved USB serial; **no Wi-Fi/BLE/HTTP/OTA** |
 | Unlock model | Master password and 6–8-digit physical PIN | Random **20-character / 100-bit owner code** generated and entered on the device |

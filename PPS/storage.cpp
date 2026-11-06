@@ -21,9 +21,15 @@ static_assert(sizeof(Header)==216,"On-disk format");
 static State status=State::FsError;
 static Outcome last=Outcome::Ok;
 static uint32_t lastReadMs=0,peakReadMs=0;
+static size_t lastReadJsonAlloc=0,lastSaveJsonAlloc=0,lastSaveSerialized=0;
+static const char* lastSavePhase="not_attempted";
 Outcome lastResult(){return last;}
 uint32_t readLastMillis(){return lastReadMs;}
 uint32_t readPeakMillis(){return peakReadMs;}
+size_t readJsonAllocatedBytes(){return lastReadJsonAlloc;}
+size_t saveJsonAllocatedBytes(){return lastSaveJsonAlloc;}
+size_t saveSerializedBytes(){return lastSaveSerialized;}
+const char* savePhase(){return lastSavePhase;}
 struct ReadTiming {
   uint32_t started=millis();
   ~ReadTiming(){uint32_t ms=millis()-started;lastReadMs=ms;if(ms>peakReadMs)peakReadMs=ms;}
@@ -224,29 +230,50 @@ bool unlock(const String& password,bool byPin){
   if(!decode(b,h,key.data,doc))return readFailure(memory);
   memcpy(dataKey.data,key.data,32);header=h;status=State::Unlocked;return true;
 }
-bool read(SecureJson& doc){
+static bool readWithScratch(SecureJson& doc, Bytes& scratch){
   ReadTiming timing;
   PpsMemory::Attempt memory;last=Outcome::Ok;doc.clear();
+  struct WipeOnExit {
+    Bytes& bytes;
+    ~WipeOnExit(){bytes.resize(0);}
+  } wipeOnExit{scratch};
   if(status!=State::Unlocked)return failure(Outcome::Unavailable);
-  Bytes b;Header h;
-  if(!loadRef(head.current,b,&h)||!decode(b,h,dataKey.data,doc)){doc.clear();return readFailure(memory);}return true;
+  Header h;
+  if(!loadRef(head.current,scratch,&h)||!decode(scratch,h,dataKey.data,doc)){
+    doc.clear();return readFailure(memory);
+  }
+  lastReadJsonAlloc=doc.allocatedBytes();return true;
 }
-static bool commit(JsonVariantConst doc,Header next,const uint8_t* key){
+bool read(SecureJson& doc){Bytes scratch;return readWithScratch(doc,scratch);}
+bool read(SecureJson& doc, Bytes& scratch){return readWithScratch(doc,scratch);}
+bool reserveSaveScratch(Bytes& scratch){
+  static_assert(sizeof(Header)<SIZE_MAX-Config::VAULT_MAX-1,"Scratch size overflow");
+  return scratch.resize(sizeof(Header)+Config::VAULT_MAX+1);
+}
+static bool commit(JsonVariantConst doc,Header next,const uint8_t* key,Bytes* reusable=nullptr){
   PpsMemory::Attempt memory;last=Outcome::Ok;
+  lastSavePhase="validate";
   if(!validate(doc))return failure(Outcome::Invalid);
   bool hadHead=head.magic==Journal::MAGIC;
+  DiskIO io;
   if(hadHead){
     if(head.current.generation==UINT32_MAX)return failure(Outcome::Storage);
-    Bytes current;if(!loadRef(head.current,current))return readFailure(memory);
+    lastSavePhase="verify_existing";
+    if(!io.verifySlot(head.current))return readFailure(memory);
   }
   const size_t n=measureJson(doc);
+  lastSaveSerialized=n;
   if(!n||n>Config::VAULT_MAX)return failure(Outcome::Invalid);
-  Bytes blob(sizeof(Header)+n+1);
-  if(!blob.valid())return failure(Outcome::NoMemory);
+  lastSavePhase="allocate_payload";
+  Bytes owned;
+  Bytes& blob=reusable?*reusable:owned;
+  if(!blob.resize(sizeof(Header)+n+1))return failure(Outcome::NoMemory);
+  lastSavePhase="serialize";
   uint8_t* payload=blob.data()+sizeof(Header);
   if(serializeJson(doc,reinterpret_cast<char*>(payload),n+1)!=n)
     return failure(memory.failed()?Outcome::NoMemory:Outcome::Storage);
   if(!blob.resize(sizeof(Header)+n))return failure(Outcome::NoMemory);
+  lastSavePhase="encrypt_and_verify";
   Secret<32> expected,actual,payloadKey;
   Secret<16> checkTag;
   if(!Crypto::hash(payload,n,expected.data)||!Crypto::subkey(key,"PPS v3 payload",payloadKey.data))
@@ -265,7 +292,8 @@ static bool commit(JsonVariantConst doc,Header next,const uint8_t* key){
   ref.generation=next.generation;ref.length=blob.size();
   if(!Crypto::hash(blob.data(),blob.size(),ref.digest))
     return failure(memory.failed()?Outcome::NoMemory:Outcome::Storage);
-  DiskIO io;Journal::Head committed{};
+  lastSavePhase="journal_publish";
+  Journal::Head committed{};
   if(!Journal::publish(io,blob.data(),blob.size(),ref,head,committed)){
     Journal::Head observed{};
     if(memory.failed()&&!hadHead&&!meta.isKey("head")){
@@ -275,12 +303,15 @@ static bool commit(JsonVariantConst doc,Header next,const uint8_t* key){
     if(!io.readHead(observed)||memcmp(&observed,&head,sizeof(head)))return damaged();
     return failure(memory.failed()?Outcome::NoMemory:Outcome::Storage);
   }
-  head=committed;header=next;last=Outcome::Ok;return true;
+  head=committed;header=next;last=Outcome::Ok;lastSavePhase="complete";return true;
 }
-static bool commit(const SecureJson& doc,Header next,const uint8_t* key){
-  if(doc.overflowed()){PpsMemory::failed();return failure(Outcome::NoMemory);}return commit(doc.as<JsonVariantConst>(),next,key);
+static bool commit(const SecureJson& doc,Header next,const uint8_t* key,Bytes* reusable=nullptr){
+  lastSavePhase="prepare_json";
+  lastSaveJsonAlloc=doc.allocatedBytes();
+  if(doc.overflowed()){PpsMemory::failed();return failure(Outcome::NoMemory);}return commit(doc.as<JsonVariantConst>(),next,key,reusable);
 }
 bool save(const SecureJson& doc){return status==State::Unlocked?commit(doc,header,dataKey.data):failure(Outcome::Unavailable);}
+bool save(const SecureJson& doc, Bytes& scratch){return status==State::Unlocked?commit(doc,header,dataKey.data,&scratch):failure(Outcome::Unavailable);}
 bool save(JsonVariantConst doc){return status==State::Unlocked?commit(doc,header,dataKey.data):failure(Outcome::Unavailable);}
 String revision(){
   const char* digits="0123456789abcdef";char value[64];size_t n=0;

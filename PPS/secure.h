@@ -25,8 +25,8 @@ class JsonSecureAllocator final : public ArduinoJson::Allocator {
   size_t limit()const{return limit_;}
   void* allocate(size_t n) override {
     if(!n)return nullptr;
-    if(n>std::numeric_limits<size_t>::max()-sizeof(JsonAllocationHeader)){PpsMemory::failed();return nullptr;}
-    size_t charge=n+sizeof(JsonAllocationHeader);if(charge>limit_-used_){PpsMemory::failed();return nullptr;}
+    if(n>std::numeric_limits<size_t>::max()-sizeof(JsonAllocationHeader)){PpsMemory::failed(PpsMemory::FailureReason::JsonBudget,n);return nullptr;}
+    size_t charge=n+sizeof(JsonAllocationHeader);if(charge>limit_-used_){PpsMemory::failed(PpsMemory::FailureReason::JsonBudget,charge);return nullptr;}
     auto h=static_cast<JsonAllocationHeader*>(PpsMemory::allocate(charge));if(!h)return nullptr;
     h->size=n;used_+=charge;return h+1;
   }
